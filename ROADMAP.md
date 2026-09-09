@@ -38,20 +38,20 @@ needs your own legally-owned ROM.
       atari800), then disassemble the resident game and refine the info files
       until `make rebuild` stays IDENTICAL.
 
-## Phase 3 — Reverse-engineer the seams  `[~]` (headless RAM-dump analysis)
+## Phase 3 — Reverse-engineer the seams  `[x]` (headless dump + controlled input)
 - [x] Headless capture path: `atari800` (SDL dummy) monitor dumps via
-      `tools/dump_ram.sh`; seam scanner `tools/scan_findings.py`. Findings in
-      `docs/05-findings.md`.
-- [x] Memory map established: engine resident `$4000–$BFFF`; main loop `$4C72`.
-- [x] Seam A located: per-player input at `$5F3D`/`$5F7A` (+ triggers
-      `$5F46`/`$5F85`); droid-AI PRNG cluster `$5E24–$5E61`.
-- [x] Seam C located: menu console read at `$5DBD` (`CONSOL`).
-- [~] Seam B: headless input-injection tool (`tools/drive_atari.py`) works;
-      candidates narrowed to the `$00F0–$00FC` block (music-engine noise —
-      `$B6,$C6,$CB,$D4`, pairs `$D9≡$FE`,`$DA≡$FF` — excluded). **Definitive
-      pinning needs an in-match capture** (attract→match start trigger not yet
-      isolated headlessly; the `$B3` state machine at `$5D74`/`$5BCD` is the
-      lead). See docs/05 "Seam-B pinning".
+      `tools/dump_ram.sh` / `tools/drive_atari.py`; scanner `tools/scan_findings.py`.
+- [x] Memory map established: engine resident `$4000–$BFFF`; VBI `$4CAB` runs the
+      logic while the main PC idles at `$4C72`.
+- [x] Seam A **fully located**: per-player control selectors `$23DE` (P1) /
+      `$33DE` (P2), gates `$5F27` / `$5F64`; joystick reads `$5F3D`/`$5F7A`;
+      **droid AI entry `$9A4A`** (X=`$00`/`$14`) — the remote player's `JSR $9A4A`
+      is the primary net hook.
+- [x] Seam C located: menu console read `$5DBD`; keyboard `$5DB7`.
+- [x] Seam B **pinned by controlled input** (force gate + inject stick, keep
+      sign-reversing bytes): P1 fwd/back `$F1:$F2,$F4:$F5,$F8`, lateral `$12D1`;
+      P2 fwd/back `$7E/$80/$8E/$90/$A5–$AD`, lateral `$FB`. Remaining: ball vars,
+      position-vs-velocity split. See docs/05.
 - [x] Free RAM for injection identified (page 6, `$094A–$0B3D`, reclaimable AI).
 
 ## Phase 4 — Integration  `(you, with this repo's code)`

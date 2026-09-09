@@ -85,15 +85,33 @@ variables in/out around `ng_tick`. **This is the entire integration surface.**
 | `rem_xi/xf,yi/yf,v*,hdg`| by `ng_tick`        | drive opponent rotofoil (**Seam A/B**) |
 | `ball_x,ball_y,ball_st` | host sets; `ng_tick`| render ball (**Seam B**)|
 
-Fill in the concrete ROM addresses here as you find them (Phase 3):
+Concrete addresses pinned on the disk image (see `docs/05-findings.md`;
+disk-specific, verify against your build). Kinematics respond to controlled
+joystick input via the control seam:
 
 ```
-; loc_xi   <- $____   (your rotofoil X int)
-; loc_xf   <- $____   (your rotofoil X frac)
-; rem_xi   -> $____   (opponent rotofoil X int)   ; was written by droid AI
-; ball_x  <-> $____   (plasmorb X)
-; ...
+; --- control seam (primary hook) ---
+; player-1 control selector   $23DE  (0=joystick, !=0=droid AI)   gate @ $5F27
+; player-2 control selector   $33DE  (0=joystick, !=0=droid AI)   gate @ $5F64
+; droid AI entry              $9A4A  (X=$00 P1, X=$14 P2)  <- redirect for remote
+;
+; --- player-1 rotofoil kinematics (forced-input confirmed) ---
+; fwd/back (vertical) 16-bit  $F1:$F2 , $F4:$F5 , $F8 , $D6 , $D8
+; lateral (left/right)        $12D1 (clean +/-8) , $089A
+;
+; --- player-2 rotofoil kinematics ---
+; fwd/back                    $7E,$80,$8E,$90,$A5..$AD,$B2 , $F8
+; lateral                     $FB (clean +/-8)
+;
+; --- still to pin ---
+; ball_x / ball_y / possession   (host simulates a match; diff while in flight)
+; exact position-vs-velocity split within each cluster
 ```
+
+Map `rem_*` onto the *remote* player's cluster and `loc_*` onto the local
+player's; the host also owns `ball_*`. The recommended hook redirects the remote
+player's `JSR $9A4A` to apply `rem_*`, then hard-corrects the cluster from `rem_*`
+every few frames to bound drift.
 
 ## Coordinate scaling — the one tuning knob
 

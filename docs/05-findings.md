@@ -144,23 +144,37 @@ turns that cluster from "the `$F0–$FC` neighbourhood" into exact addresses.
 
 ## Match-start: the one headless blocker
 
-Getting a live match running (which is what would make the plasmorb and scoring
-appear) could **not** be triggered headlessly. The title/idle state is stable
-(`SDLSTL=$2033`, both control selectors `$00`, menu vars `$C1=$C2=$FF`), and it
-did not transition under: forced console Start (held and as a press edge),
-forced triggers, forcing the attract flag `$B3` negative, or forcing the attract
-countdown `$33D8/$33D9` to expire. The input decode (`$5DA5`) reads the keyboard
-(`$5DB7`) only when a POKEY key IRQ is pending (`BIT $D20E` / `BVS`), so the
-start most likely waits on a **specific keyboard key** — not cheap to brute
-force headlessly. The fire-edge latch `$23E1` is consumed at `$67E8` (a lead,
-but that path looks gameplay-side). The game programs ANTIC's display list
-directly rather than via `SDLSTL`, so a screen-change probe is unavailable.
+The game manual settles how a match starts: the console shows **demonstration
+matches** (random human/droid combinations, ~1 min each); you press the **left
+joystick's fire button** to start a game, and **Select** cycles the options
+(each player's designation flashes; joystick up/down picks **HUMAN or DROID 1–9**;
+joystick right steps player-1 → game length → player-2). This confirms two
+things about our map:
 
-Pragmatic resolution: start a match with **one keypress in a windowed
-`atari800`** (or crack the keyboard-start separately), then the automated
-`dump_ram.sh run` + `scan_findings.py diff` tools pin the ball and score
-variables exactly as the rotofoils were pinned. Everything else is done
-headlessly.
+- The per-player **HUMAN / DROID-n designation is exactly the control selector**
+  we found: `$23DE`/`$33DE` = `0` is HUMAN, non-zero is a droid level. Both read
+  `$00` in the captured state, i.e. the default **regulation two-human game** —
+  which is precisely what network mode wants (see `netp_install`).
+- Start is the **fire button**, not a keyboard key (that earlier hypothesis was
+  wrong).
+
+Even so, a match could **not** be started headlessly. The idle state is stable
+(`SDLSTL=$2033`, both selectors `$00`, `$C1=$C2=$FF`) and did not transition
+under forced triggers (held and as clean press/release edges — the fire-edge
+latch `$23E1` toggles and is consumed at `$67E8`, and `$0D` flips, but no match
+begins), nor under forced console Start, forced `$B3`, or an expired attract
+countdown. The instruction-patched trigger evidently does not reproduce what the
+start path samples (likely a real hardware read at a specific point, or a
+demo-cycle gate). The game also drives ANTIC directly rather than through
+`SDLSTL`, so there is no easy screen-change probe. The RAM captured is a
+human/human demo where the two rotofoils merely coast — no droid AI and no
+active plasmorb.
+
+Pragmatic resolution (tiny): press fire once in a windowed `atari800` to start a
+regulation game, then — headless again — `dump_ram.sh run` + `scan_findings.py
+diff` pin the plasmorb and score variables exactly as the rotofoils were pinned.
+Alternatively, catch a **droid** demo (an auto-played match with an active ball)
+by sampling until a selector reads non-zero. Everything else is done headlessly.
 
 ## Free RAM for injected code
 

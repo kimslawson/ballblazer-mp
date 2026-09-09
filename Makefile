@@ -104,5 +104,9 @@ bench: dirs
 sim:
 	@$(PY) tools/netsim.py
 
+# ---- in-game hook proof (needs your own rom/ballblazer.atr; not in `test`) --
+hooktest:
+	@bash tools/test_hook_emu.sh
+
 clean:
 	rm -rf $(BUILD)

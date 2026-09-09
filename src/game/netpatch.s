@@ -44,18 +44,25 @@ net_mode:   .res 1              ; 0 = stock game, 1 = network match active
 ; --------------------------------------------------------------------------
 ; netp_install - enter network-match mode.
 ;   in : net_ptr -> EOL-terminated N: URL, A = role (0 = client, 1 = host)
-;   Sets P1=joystick / P2=droid (so the craft is "live"), opens the link,
-;   installs the VBI-exit wedge, and arms net_mode. Returns A = CIO status
-;   from the OPEN (Z set on success).
+;   Configures the manual's "regulation two-human game" (both players HUMAN),
+;   opens the link, installs the VBI-exit wedge, and arms net_mode. Returns
+;   A = CIO status from the OPEN (Z set on success).
+;
+;   Per the game manual, a two-human match is the default (fire starts it) and
+;   both players' designations are HUMAN (selector 0). We leave it that way: the
+;   local player is a real human on P1's joystick; the remote player is P2, whose
+;   right-joystick input we simply ignore and whose state the VBI-exit wedge
+;   overwrites from the network each frame. Because both players are HUMAN, the
+;   droid AI ($9A4A) is never called - so the robust hook is the state-overwrite
+;   wedge, not a $9A4A redirect (that redirect only applies if you instead run
+;   the opponent as a DROID; see docs/07).
 ; --------------------------------------------------------------------------
 .proc netp_install
         pha                         ; save role
-        ; --- route control sources ---
+        ; --- regulation two-human game: both designations HUMAN ---
         lda #0
-        sta GAME_P1_SEL             ; player 1 = local human (joystick)
-        lda #1
-        sta GAME_P2_SEL             ; player 2 = "droid" so it is active; we
-                                    ;   overwrite its state each frame below.
+        sta GAME_P1_SEL             ; player 1 = local human (P1 joystick)
+        sta GAME_P2_SEL             ; player 2 = remote human (state from network)
         ; --- reset link + role flags ---
         jsr ng_init
         pla                         ; role

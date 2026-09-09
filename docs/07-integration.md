@@ -56,13 +56,22 @@ in order of preference:
 
 ### 4. Install the hooks (what `netp_install` does on real code)
 
-1. Redirect the **remote** player's `JSR $9A4A` (`$5F37` for P1, `$5F74` for P2)
-   to the net dispatch — or keep the VBI-exit wedge at `$4CBB` (proven) that runs
-   `netp_post` each frame.
-2. Set control selectors: local player `$23DE`/`$33DE` = 0 (joystick), remote = a
-   droid value so its craft is active.
+Net mode is the manual's **regulation two-human game**: both designations HUMAN,
+so both selectors `$23DE`/`$33DE` = 0 and the droid AI `$9A4A` is *never called*.
+Therefore:
+
+1. Keep the **VBI-exit wedge** at `$4CBB` (proven by `make hooktest`) as the
+   hook: `netp_post` runs every frame, captures the local player into `loc_*`,
+   `ng_tick`s, and overwrites the remote player's kinematics from `rem_*`. This
+   is robust because it does not depend on which control path runs.
+2. Leave both designations HUMAN; the remote player's local (right-joystick)
+   input is simply ignored — the wedge is the authority for its state.
 3. `ng_init`, then `net_open` the URL. Put the URL + role where `netp_install`
    reads them (a `linkcfg`-style include per machine, like the demo).
+
+(The alternative "redirect `JSR $9A4A`" hook only applies if you instead run the
+opponent as a **DROID** and want to reuse the game's integrator — not needed for
+the two-human regulation game.)
 
 ### 5. Bring up the link incrementally
 

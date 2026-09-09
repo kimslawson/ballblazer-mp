@@ -1,0 +1,18 @@
+GLOBAL {
+    INPUTNAME  "build/fakecart.rom";
+    OUTPUTNAME "build/fakecart.s";
+    STARTADDR  $8000;
+    CPU        "6502";
+    COMMENTS   3;
+};
+
+RANGE { START $8000; END $800F; TYPE Code; };
+RANGE { START $8010; END $BFF9; TYPE ByteTable; };
+RANGE { START $BFFA; END $BFFB; TYPE AddrTable; };
+RANGE { START $BFFC; END $BFFD; TYPE ByteTable; };
+RANGE { START $BFFE; END $BFFF; TYPE AddrTable; };
+
+LABEL { NAME "cart_run";     ADDR $BFFA; };
+LABEL { NAME "cart_present"; ADDR $BFFC; };
+LABEL { NAME "cart_opts";    ADDR $BFFD; };
+LABEL { NAME "cart_init";    ADDR $BFFE; };

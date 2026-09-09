@@ -1,0 +1,109 @@
+; ============================================================================
+; ballblazer.info  -  da65 control file for disassembling the Ballblazer cart
+; ----------------------------------------------------------------------------
+; THIS FILE CONTAINS NO ROM CONTENT.  It is a reverse-engineering control file:
+; the standard Atari cartridge structure, well-known OS/hardware register
+; equates, and a place to record game-specific labels AS YOU DISCOVER THEM.
+;
+; Workflow (see docs/03-disassembly.md):
+;   1. Put your own legally-owned 16K Ballblazer cart dump at rom/ballblazer.rom
+;      (or pass a path to disasm/disasm.sh).  disasm.sh strips a 16-byte "CART"
+;      header if present and writes the raw bytes to build/ballblazer.raw.
+;   2. Run disasm/disasm.sh -> build/ballblazer.s.
+;   3. Read it.  Where da65 mis-decoded data as code, add a RANGE ... TYPE
+;      ByteTable/AddrTable/TextTable here and re-run.  Name routines/variables
+;      with LABEL entries.  Re-run until the listing is clean and
+;      disasm/rebuild.sh reports the rebuilt image is byte-identical.
+;
+; The whole $8000-$BFF9 window is left as default (code) on purpose: that is the
+; RE starting point.  Carve out data ranges iteratively.
+; ============================================================================
+
+GLOBAL {
+    INPUTNAME  "build/ballblazer.raw";
+    OUTPUTNAME "build/ballblazer.s";
+    STARTADDR  $8000;              ; 16K cart maps to $8000-$BFFF.
+                                   ; For an 8K dump use $A000 and size 8K.
+    CPU        "6502";
+    COMMENTS   3;                  ; keep address/hex comments (RE aid)
+};
+
+; ---- Cartridge control block ($BFFA-$BFFF) -----------------------------
+RANGE { START $BFFA; END $BFFB; TYPE AddrTable; };   ; run/start vector
+RANGE { START $BFFC; END $BFFD; TYPE ByteTable; };   ; present flag, options
+RANGE { START $BFFE; END $BFFF; TYPE AddrTable; };   ; init vector
+
+LABEL { NAME "cart_run";     ADDR $BFFA; COMMENT "OS JMPs here to run cart"; };
+LABEL { NAME "cart_present"; ADDR $BFFC; COMMENT "$00 = cartridge present"; };
+LABEL { NAME "cart_opts";    ADDR $BFFD; COMMENT "bit2=init cart, bit0=boot disk"; };
+LABEL { NAME "cart_init";    ADDR $BFFE; COMMENT "OS JSRs here to init cart"; };
+
+; ---- Zero page / page 2 OS variables the game surely touches ------------
+LABEL { NAME "RTCLOK";  ADDR $0012; COMMENT "3-byte frame clock"; };
+LABEL { NAME "SDMCTL";  ADDR $022F; COMMENT "DMA control shadow"; };
+LABEL { NAME "SDLSTL";  ADDR $0230; COMMENT "display list ptr lo"; };
+LABEL { NAME "SDLSTH";  ADDR $0231; COMMENT "display list ptr hi"; };
+LABEL { NAME "STICK0";  ADDR $0278; COMMENT "joystick 0 shadow"; };
+LABEL { NAME "STICK1";  ADDR $0279; COMMENT "joystick 1 shadow"; };
+LABEL { NAME "STRIG0";  ADDR $0284; COMMENT "trigger 0 shadow"; };
+LABEL { NAME "STRIG1";  ADDR $0285; COMMENT "trigger 1 shadow"; };
+LABEL { NAME "COLOR0";  ADDR $02C4; };
+LABEL { NAME "COLOR1";  ADDR $02C5; };
+LABEL { NAME "COLOR2";  ADDR $02C6; };
+LABEL { NAME "COLOR3";  ADDR $02C7; };
+LABEL { NAME "COLOR4";  ADDR $02C8; };
+LABEL { NAME "DVSTAT";  ADDR $02EA; COMMENT "4-byte device status (N: bytes-waiting)"; };
+LABEL { NAME "CIOV";    ADDR $E456; COMMENT "CIO entry, X = IOCB#*16"; };
+LABEL { NAME "SIOV";    ADDR $E459; COMMENT "SIO entry"; };
+LABEL { NAME "SETVBV";  ADDR $E45C; COMMENT "set vertical-blank vector"; };
+LABEL { NAME "XITVBV";  ADDR $E462; COMMENT "exit vertical blank"; };
+
+; ---- GTIA ($D000-$D01F) -------------------------------------------------
+LABEL { NAME "HPOSP0"; ADDR $D000; };
+LABEL { NAME "HPOSP1"; ADDR $D001; };
+LABEL { NAME "HPOSP2"; ADDR $D002; };
+LABEL { NAME "HPOSP3"; ADDR $D003; };
+LABEL { NAME "GRAFP0"; ADDR $D00D; };
+LABEL { NAME "TRIG0";  ADDR $D010; };
+LABEL { NAME "PAL";    ADDR $D014; };
+LABEL { NAME "COLPM0"; ADDR $D012; };
+LABEL { NAME "COLBK";  ADDR $D01A; };
+LABEL { NAME "PRIOR";  ADDR $D01B; };
+LABEL { NAME "CONSOL"; ADDR $D01F; COMMENT "Start/Select/Option (active low)"; };
+
+; ---- POKEY ($D200-$D20F) ------------------------------------------------
+LABEL { NAME "AUDF1";  ADDR $D200; };
+LABEL { NAME "AUDC1";  ADDR $D201; };
+LABEL { NAME "AUDF2";  ADDR $D202; };
+LABEL { NAME "AUDC2";  ADDR $D203; };
+LABEL { NAME "AUDCTL"; ADDR $D208; };
+LABEL { NAME "RANDOM"; ADDR $D20A; COMMENT "PRNG - watch the droid AI read this"; };
+LABEL { NAME "SKCTL";  ADDR $D20F; };
+
+; ---- PIA ($D300-$D303): joystick directions live here -------------------
+LABEL { NAME "PORTA";  ADDR $D300; COMMENT "joysticks 0/1 directions"; };
+LABEL { NAME "PORTB";  ADDR $D301; };
+LABEL { NAME "PACTL";  ADDR $D302; };
+LABEL { NAME "PBCTL";  ADDR $D303; };
+
+; ---- ANTIC ($D400-$D40F) ------------------------------------------------
+LABEL { NAME "DMACTL"; ADDR $D400; };
+LABEL { NAME "DLISTL"; ADDR $D402; };
+LABEL { NAME "DLISTH"; ADDR $D403; };
+LABEL { NAME "HSCROL"; ADDR $D404; COMMENT "fine scroll - the Rotoscape grid"; };
+LABEL { NAME "VSCROL"; ADDR $D405; };
+LABEL { NAME "NMIEN";  ADDR $D40E; };
+LABEL { NAME "VCOUNT"; ADDR $D40B; };
+LABEL { NAME "WSYNC";  ADDR $D40A; };
+
+; ============================================================================
+; GAME LABELS - fill these in during RE.  Suggested first targets (docs/01):
+;   * the per-player input read (droid vs. joystick branch) -> the network hook
+;   * rotofoil X/Y position + velocity + heading variables (map to loc_*/rem_*)
+;   * plasmorb (ball) X/Y/possession variables (map to ball_*)
+;   * the two-player vs one-player mode flag
+;   * score variables and the goal-scored routine
+; Example once found:
+;   LABEL { NAME "p2_input";  ADDR $8xxx; COMMENT "droid picks P2 direction here"; };
+;   RANGE { START $8yyy; END $8zzz; TYPE ByteTable; COMMENT "grid gfx"; };
+; ============================================================================

@@ -1,0 +1,25 @@
+# Build artifacts
+/build/
+*.o
+*.bin
+*.xex
+*.map
+*.rebuilt
+*.raw
+
+# --- ROMs: NEVER commit copyrighted cartridge images or their disassembly ---
+# The Ballblazer ROM is copyrighted (Lucasfilm Games / Atari).  Supply your own
+# legally-owned dump locally; it stays out of version control.
+/rom/*
+!/rom/README.md
+!/rom/.gitkeep
+
+# A full verbatim disassembly of the ROM is a derivative work of copyrighted
+# code - keep it local too.  Your annotated info file (disasm/ballblazer.info)
+# and patches ARE tracked; the generated listing is not.
+/disasm/ballblazer.s
+/build/ballblazer.s
+
+# editor / OS cruft
+*~
+.DS_Store

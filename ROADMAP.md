@@ -38,12 +38,17 @@ needs your own legally-owned ROM.
       atari800), then disassemble the resident game and refine the info files
       until `make rebuild` stays IDENTICAL.
 
-## Phase 3 — Reverse-engineer the seams  `(you)`
-- [ ] Seam A: locate the droid-AI / opponent-input hook (trace `RANDOM $D20A`,
-      `STICK1 $0279`).
-- [ ] Seam B: locate rotofoil position/velocity/heading and plasmorb
-      position/possession; fill the mapping table in `docs/04-netcode.md`.
-- [ ] Seam C: locate the 1P/2P mode flag and goal/match-over routines.
+## Phase 3 — Reverse-engineer the seams  `[~]` (headless RAM-dump analysis)
+- [x] Headless capture path: `atari800` (SDL dummy) monitor dumps via
+      `tools/dump_ram.sh`; seam scanner `tools/scan_findings.py`. Findings in
+      `docs/05-findings.md`.
+- [x] Memory map established: engine resident `$4000–$BFFF`; main loop `$4C72`.
+- [x] Seam A located: per-player input at `$5F3D`/`$5F7A` (+ triggers
+      `$5F46`/`$5F85`); droid-AI PRNG cluster `$5E24–$5E61`.
+- [x] Seam C located: menu console read at `$5DBD` (`CONSOL`).
+- [~] Seam B: zero-page candidates found (`$00B5,$00F1,$00F4,$00F7…`); still
+      need to **pin** rotofoil/ball vars with in-game motion diffs.
+- [x] Free RAM for injection identified (page 6, `$094A–$0B3D`, reclaimable AI).
 
 ## Phase 4 — Integration  `(you, with this repo's code)`
 - [ ] Add a "network match" mode: `ng_init` + open `N:`, force two-rotofoil

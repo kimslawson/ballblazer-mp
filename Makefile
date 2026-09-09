@@ -66,5 +66,19 @@ disasm: dirs
 rebuild: dirs
 	@bash disasm/rebuild.sh
 
+# ---- RAM capture + analysis (needs your own rom/ballblazer.atr) -------------
+DISK ?= rom/ballblazer.atr
+
+dump: dirs
+	@bash tools/dump_ram.sh handoff $(DISK) $(BUILD)/disk/ram.bin
+
+dump-run: dirs
+	@bash tools/dump_ram.sh run $(DISK) $(BUILD)/disk/ram_run.bin 6
+
+findings: dirs
+	@test -f $(BUILD)/disk/ram_run.bin || bash tools/dump_ram.sh run $(DISK) $(BUILD)/disk/ram_run.bin 6
+	@echo "## memory map ##";     python3 tools/scan_findings.py map $(BUILD)/disk/ram_run.bin
+	@echo; echo "## I/O seams ##"; python3 tools/scan_findings.py io  $(BUILD)/disk/ram_run.bin
+
 clean:
 	rm -rf $(BUILD)

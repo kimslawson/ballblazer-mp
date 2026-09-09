@@ -1,8 +1,9 @@
 # ============================================================================
 # ballblazer.info  -  da65 control file for the CARTRIDGE variant of Ballblazer
 # ----------------------------------------------------------------------------
-# NOTE: the disk (.atr) variant uses disasm/disk-boot.info instead; disasm.sh
-# auto-selects.  Use this file only for a 16K cart dump.
+# NOTE: the disk (.atr) variant uses disasm/disk-boot.info (the boot loader) and
+# disasm/ballblazer-resident.info (the resident game's label map - the Step-5
+# "three seams"); disasm.sh auto-selects. Use THIS file only for a 16K cart dump.
 #
 # THIS FILE CONTAINS NO ROM CONTENT.  It is a reverse-engineering control file:
 # the standard Atari cartridge structure, well-known OS/hardware equates, and a

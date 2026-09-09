@@ -132,24 +132,33 @@ make selftest        # byte-identical round-trip, no ROM required
 
 ## Step 5 — find the three seams
 
-With a clean listing, locate (see [`01-architecture.md`](01-architecture.md)):
+For the **disk** build this is done; the shared map lives in
+[`disasm/ballblazer-resident.info`](../disasm/ballblazer-resident.info) (run it
+against your own `build/disk/ram_run.bin` — see that file's header). Rather than
+a memory watch, the seams were pinned by **controlled input injection** in
+`atari800` (`tools/drive_atari.py`): force a player's control gate onto the
+joystick path, inject a stick direction, and keep the bytes whose delta reverses
+sign — see [`docs/05-findings.md`](05-findings.md). Status:
 
-- **Seam A — opponent AI/input hook.** In `atari800`'s monitor, break on reads
-  of `RANDOM` (`$D20A`) and `STICK1` (`$0279`). The routine that consumes them
-  to steer the second rotofoil is the droid AI. Label it; this is where the
-  network opponent's state gets applied instead.
-- **Seam B — state variables.** Use the emulator's memory watch while you glide
-  around the grid: the bytes that change smoothly are your rotofoil's
-  position/velocity; the one tracking the snap-to-target is heading. Do the same
-  for the plasmorb. Label them and note them in `docs/04-netcode.md`'s mapping
-  table.
-- **Seam C — mode select + scoring.** Find the 1P/2P mode flag and the
-  goal-scored / match-over routines.
+- **Seam A — opponent AI/input hook.** ✅ Located. Per-player control selectors
+  `$23DE`/`$33DE` (0 = joystick, ≠0 = droid), gates `$5F27`/`$5F64`, droid AI
+  `$9A4A` (X=`$00`/`$14`), called at `$5F37`/`$5F74`. The remote player's
+  `JSR $9A4A` (`$5F74`) is where network state is applied instead.
+- **Seam B — state variables.** ✅ Rotofoils pinned. P1 fwd/back
+  `$F1:$F2`/`$F4:$F5`/`$F8`, lateral `$12D1`; P2 fwd/back
+  `$7E/$80/$8E/$90`, lateral `$FB`. ⏳ The **plasmorb** vars are not active in
+  the title state (both selectors 0, no ball) — capture them from a real
+  in-flight match and diff.
+- **Seam C — mode select + scoring.** ◐ Partial. 1P/2P mode is encoded in the
+  selectors themselves and set up around `$5E02–$5E91`; input reads are labelled
+  (`$5DB7` keyboard, `$5DBD` console). ⏳ The **score vars** and **goal / match-
+  over** routines still need an in-match capture (leads: a "first to 10"
+  `CMP #$0A`, and the match countdown timer).
 
-Record every address you identify as `LABEL`s in `disasm/ballblazer.info` — that
-file is tracked in git and becomes the shared map of the ROM. The generated
-`build/ballblazer.s` is not tracked (it is a derivative of copyrighted code);
-your **understanding** of it lives in the info file and in the patch sources.
+Every confirmed address is recorded as a `LABEL` in the tracked resident map, so
+it becomes the shared understanding of the ROM. The generated listing
+(`build/disk/resident.s`) is **not** tracked — it is a derivative of copyrighted
+code; your understanding lives in the `.info` file and the patch sources.
 
 ## Useful `atari800` monitor commands
 

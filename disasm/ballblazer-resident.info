@@ -1,0 +1,103 @@
+# ============================================================================
+# ballblazer-resident.info  -  da65 label map for the DISK-resident game image
+# ----------------------------------------------------------------------------
+# This is the shared, tracked map of the ROM built during Step 5 of
+# docs/03-disassembly.md (the "three seams"). It contains ONLY addresses and
+# labels (memory-map facts) — no game code. Run it against your own local RAM
+# capture to get an annotated listing:
+#
+#     make dump-run                       # -> build/disk/ram_run.bin (git-ignored)
+#     da65 -i disasm/ballblazer-resident.info   # -> build/disk/resident.s (local)
+#
+# The resident image is the game after the disk loader has run (see
+# disk-boot.info): engine code+data in $4000-$BFFF, fast variables in zero page,
+# work buffers in $1000-$3FFF. Everything below was confirmed by controlled-
+# input reverse engineering in atari800 (docs/05-findings.md).
+#
+# da65 comment char is '#'.  ';' inside { } is a separator, not a comment.
+# ============================================================================
+
+GLOBAL {
+    INPUTNAME  "build/disk/ram_run.bin";
+    OUTPUTNAME "build/disk/resident.s";
+    STARTADDR  $0000;
+    CPU        "6502";
+    COMMENTS   3;
+};
+
+# Non-code regions (so da65 does not mis-decode them as instructions). The
+# engine code lives in $4000-$BFFF; refine these ranges as you read the listing.
+RANGE { START $0000; END $3FFF; TYPE ByteTable; };   # ZP, stack, page 2-6, buffers
+RANGE { START $C000; END $C000; TYPE ByteTable; };
+
+# ==== routine entry points (Seam A control flow) ========================
+LABEL { NAME "main_loop";   ADDR $4C72; COMMENT "idle spin on attract flag; logic is in the VBI"; };
+LABEL { NAME "vbi";         ADDR $4CAB; COMMENT "immediate VBI (VVBLKI target)"; };
+LABEL { NAME "vbi_exit";    ADDR $4CBB; COMMENT "JMP XITVBV - the net patch wedges here"; };
+LABEL { NAME "dli";         ADDR $599B; COMMENT "display-list interrupt (VDSLST target)"; };
+LABEL { NAME "input_poll";  ADDR $5DA5; COMMENT "per-frame keyboard/console poll"; };
+LABEL { NAME "player_ctrl"; ADDR $5F27; COMMENT "player-control dispatch (P1 then P2)"; };
+LABEL { NAME "p2_ctrl";     ADDR $5F64; COMMENT "player-2 control gate"; };
+LABEL { NAME "droid_ai";    ADDR $9A4A; COMMENT "droid brain; X=$00 P1 / $14 P2 -> net hook"; };
+
+# ==== input reads =======================================================
+LABEL { NAME "rd_kbcode";   ADDR $5DB7; COMMENT "LDA KBCODE (keyboard)"; };
+LABEL { NAME "rd_consol";   ADDR $5DBD; COMMENT "LDA CONSOL (Start/Select/Option)"; };
+LABEL { NAME "rd_joy_p1";   ADDR $5F3D; COMMENT "LDA PORTA, P1 stick (low nibble)"; };
+LABEL { NAME "rd_trig_p1";  ADDR $5F46; COMMENT "LDX TRIG0, P1 fire"; };
+LABEL { NAME "rd_joy_p2";   ADDR $5F7A; COMMENT "LDA PORTA, P2 stick (high nibble)"; };
+LABEL { NAME "rd_trig_p2";  ADDR $5F85; COMMENT "LDX TRIG1, P2 fire"; };
+LABEL { NAME "droid_jsr_p1";ADDR $5F37; COMMENT "JSR droid_ai for P1"; };
+LABEL { NAME "droid_jsr_p2";ADDR $5F74; COMMENT "JSR droid_ai for P2 (net hook site)"; };
+
+# ==== Seam A/C: per-player control selectors & mode =====================
+# 0 = that player is a human (reads its joystick); != 0 = droid AI drives it.
+# So one/two-player mode is encoded here (1P: P1=0, P2!=0; 2P: both 0).
+LABEL { NAME "p1_control";  ADDR $23DE; COMMENT "P1 control selector (0=joy,!=0=droid)"; };
+LABEL { NAME "p2_control";  ADDR $33DE; COMMENT "P2 control selector (0=joy,!=0=droid)"; };
+LABEL { NAME "p1_trig_edge";ADDR $23E1; COMMENT "P1 trigger edge-detect latch"; };
+LABEL { NAME "menu_c1";     ADDR $00C1; COMMENT "menu var (skill/select; cmp #$0C)"; };
+LABEL { NAME "menu_c2";     ADDR $00C2; COMMENT "menu var"; };
+LABEL { NAME "attract_flag";ADDR $00B3; COMMENT "main-loop wait flag"; };
+LABEL { NAME "attract_ctr"; ADDR $00B5; COMMENT "main-loop frame counter"; };
+LABEL { NAME "attract_to_l";ADDR $33D8; COMMENT "attract countdown lo"; };
+LABEL { NAME "attract_to_h";ADDR $33D9; COMMENT "attract countdown hi"; };
+
+# ==== Seam B: rotofoil kinematics (controlled-input confirmed) ==========
+# Player 1 (local). fwd/back moves as 16-bit lockstep pairs; lateral is $12D1.
+LABEL { NAME "p1_fb_hi";    ADDR $00F1; COMMENT "P1 fwd/back kinematic (hi of 16-bit)"; };
+LABEL { NAME "p1_fb_lo";    ADDR $00F2; COMMENT "P1 fwd/back kinematic (lo)"; };
+LABEL { NAME "p1_fb2_hi";   ADDR $00F4; COMMENT "P1 fwd/back kinematic 2 (hi)"; };
+LABEL { NAME "p1_fb2_lo";   ADDR $00F5; COMMENT "P1 fwd/back kinematic 2 (lo)"; };
+LABEL { NAME "p1_fb3";      ADDR $00F8; COMMENT "P1 fwd/back responder"; };
+LABEL { NAME "p1_lat";      ADDR $12D1; COMMENT "P1 lateral kinematic (clean +/-8)"; };
+# Player 2 (remote/opponent). Scattered ZP cluster.
+LABEL { NAME "p2_fb_a";     ADDR $0080; COMMENT "P2 fwd/back responder (+/-5)"; };
+LABEL { NAME "p2_fb_b";     ADDR $008E; COMMENT "P2 fwd/back responder (+/-5)"; };
+LABEL { NAME "p2_fb_c";     ADDR $007E; COMMENT "P2 fwd/back responder"; };
+LABEL { NAME "p2_fb_d";     ADDR $0090; COMMENT "P2 fwd/back responder"; };
+LABEL { NAME "p2_lat";      ADDR $00FB; COMMENT "P2 lateral kinematic (clean +/-8)"; };
+
+# ==== music engine (excluded from Seam B - churns every frame) ==========
+LABEL { NAME "music_a";     ADDR $00B6; };
+LABEL { NAME "music_b";     ADDR $00C6; };
+LABEL { NAME "music_c";     ADDR $00CB; };
+LABEL { NAME "music_d";     ADDR $00D4; };
+
+# ==== hardware / OS (for readability) ===================================
+LABEL { NAME "RANDOM"; ADDR $D20A; };
+LABEL { NAME "PORTA";  ADDR $D300; };
+LABEL { NAME "CONSOL"; ADDR $D01F; };
+LABEL { NAME "KBCODE"; ADDR $D209; };
+LABEL { NAME "TRIG0";  ADDR $D010; };
+LABEL { NAME "TRIG1";  ADDR $D011; };
+LABEL { NAME "VVBLKI"; ADDR $0222; };
+LABEL { NAME "XITVBV"; ADDR $E462; };
+LABEL { NAME "SIOV";   ADDR $E459; };
+
+# ==== STILL OPEN (need an in-match capture; see docs/05) ================
+# Seam B ball: the plasmorb X/Y/possession vars are not active in the title
+#   state (both selectors 0, no match). Capture two frames while the ball is in
+#   flight in a real match and diff.
+# Seam C scoring: the score variables and the goal-scored / match-over routines.
+#   Leads: a "first to 10" compare (CMP #$0A) and the match countdown timer.

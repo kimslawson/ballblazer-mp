@@ -14,10 +14,75 @@ No ROM or disassembly is committed to this repo (see the `.gitignore` and
 sudo apt-get install cc65 dasm atari800      # ca65, ld65, da65, sim65 + emu
 ```
 
-## Step 1 — place your ROM
+## Two image types
+
+Ballblazer exists as both a **disk** (`.atr`) and a **cartridge** (`.rom`). Most
+dumps — including the Internet Archive "k_file" — are disks. `disasm/disasm.sh`
+auto-detects which you have.
+
+- **Disk (`.atr`)** — a custom-boot disk (no DOS). The OS loads a 3-sector boot
+  loader to `$0700` and runs it; that loader programs an SIO control block at
+  `$0300–$030B` and calls `SIOV` (`$E459`) to read the rest of the game from
+  disk, then hands off with `JMP (RUNAD)` (`$02E0`). See the **Disk version**
+  steps below.
+- **Cartridge (`.rom`)** — a 16K image mapped at `$8000–$BFFF` with a control
+  block at `$BFFA`. See the **Cartridge version** steps further down.
+
+## Step 1 — place your image
+
+Put your own copy at `rom/ballblazer.atr` (disk) or `rom/ballblazer.rom` (cart).
+See `rom/README.md`. It is git-ignored and stays on your machine.
+
+---
+
+## Disk version
+
+### D1 — unpack + disassemble the loader
+
+```sh
+make disasm            # detects the .atr, runs tools/atr.py, da65 the loader
+```
+
+This writes `build/disk/sectors.img` (all sector bytes) and `build/disk/boot.bin`
+(the 384-byte loader), then disassembles the loader with
+`disasm/disk-boot.info` to `build/disk/boot.s`.
+
+```sh
+make rebuild           # reassemble boot.s -> byte-identical to boot.bin
+```
+
+When that says **IDENTICAL**, your loader disassembly is faithful.
+
+### D2 — follow the loader to map the segments
+
+Read `build/disk/boot.s`. Trace how it fills the SIO DCB (`DAUX1/DAUX2` = sector
+number, `DBUFLO/HI` = destination, `DBYTLO/HI` = length) and loops `SIOV` to pull
+sector groups into RAM. Each group's destination address tells you where a chunk
+of the game lands. Record those addresses as `LABEL`/`RANGE` entries in
+`disasm/disk-boot.info` (or a new per-segment info file).
+
+### D3 — get the whole resident game (recommended: memory dump)
+
+Statically following a multi-segment SIO loader is tedious, and some loaders
+relocate or decompress. The pragmatic route is dynamic:
+
+1. Boot the disk in `atari800` and let the game load to its title/menu.
+2. Drop into the built-in monitor and save RAM to a file (e.g. dump the main
+   RAM range `$0700–$BFFF` — adjust once D2 tells you the real extents).
+3. Disassemble that dump at its true origin with a new `.info` file, and iterate
+   code/data ranges exactly as in the cartridge steps below.
+
+The dumped image is the *actual* code executing, so the seam hunt in Step 5
+happens against it. (Keep the dump local — it is derived from copyrighted code.)
+
+---
+
+## Cartridge version
+
+### Step 1c — place your ROM
 
 Put your 16K Ballblazer cartridge dump at `rom/ballblazer.rom` (a `CART`-headered
-dump is fine — the header is stripped automatically). See `rom/README.md`.
+dump is fine — the header is stripped automatically).
 
 ## Step 2 — first disassembly
 

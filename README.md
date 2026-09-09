@@ -69,13 +69,17 @@ make demo
 #    Each side should see the other's position move (HUD line + green heartbeat).
 ```
 
-Then, on your own ROM:
+Then, on your own copy (disk `.atr` or cart `.rom` — auto-detected):
 
 ```sh
-cp /path/to/your/ballblazer.rom rom/ballblazer.rom
-make disasm        # da65 -> build/ballblazer.s
-make rebuild       # verify byte-identical, then start the RE (docs/03)
+cp /path/to/your/ballblazer.atr rom/ballblazer.atr   # disk (most common)
+make disasm        # unpack ATR + da65 the boot loader (build/disk/boot.s)
+make rebuild       # verify the loader is byte-identical, then start the RE
 ```
+
+The disk is a custom-boot image: a 3-sector loader at `$0700` SIO-loads the
+game and jumps via `RUNAD`. Mapping the loaded segments (or dumping RAM from
+`atari800`) is the next step — see [`docs/03-disassembly.md`](docs/03-disassembly.md).
 
 ## Layout
 

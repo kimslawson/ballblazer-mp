@@ -1,0 +1,54 @@
+# ============================================================================
+# disk-boot.info  -  da65 control file for the Ballblazer DISK boot loader
+# ----------------------------------------------------------------------------
+# The Ballblazer .atr is a CUSTOM-BOOT disk (no DOS).  The OS loads the first
+# 3 sectors (384 bytes) to $0700 and executes at $0700+6; that loader programs
+# an SIO control block at $0300-$030B and calls SIOV ($E459) to read the rest
+# of the game from disk, then hands off via JMP (RUNAD) at $02E0.
+#
+# This file disassembles ONLY the 384-byte boot loader (build/disk/boot.bin,
+# produced by `tools/atr.py unpack`).  Contains no ROM/game bytes - just the
+# Atari boot-record layout, the SIO DCB names, and OS equates.
+#
+# da65 comment char is '#'.  ';' inside { } is a separator, not a comment.
+# ============================================================================
+
+GLOBAL {
+    INPUTNAME  "build/disk/boot.bin";
+    OUTPUTNAME "build/disk/boot.s";
+    STARTADDR  $0700;
+    CPU        "6502";
+    COMMENTS   3;
+};
+
+# ---- Boot record header ($0700-$0705) ----------------------------------
+RANGE { START $0700; END $0701; TYPE ByteTable; };   # flag, sector count
+RANGE { START $0702; END $0705; TYPE AddrTable; };   # load addr, init addr
+LABEL { NAME "boot_flag";  ADDR $0700; COMMENT "boot flag (0)"; };
+LABEL { NAME "boot_count"; ADDR $0701; COMMENT "# sectors OS loads (=3)"; };
+LABEL { NAME "boot_load";  ADDR $0702; COMMENT "load address ($0700)"; };
+LABEL { NAME "boot_init";  ADDR $0704; COMMENT "init address"; };
+LABEL { NAME "boot_entry"; ADDR $0706; COMMENT "first executed instruction"; };
+
+# ---- SIO device control block (DCB, $0300-$030B) -----------------------
+LABEL { NAME "DDEVIC"; ADDR $0300; COMMENT "device id"; };
+LABEL { NAME "DUNIT";  ADDR $0301; COMMENT "unit #"; };
+LABEL { NAME "DCOMND"; ADDR $0302; COMMENT "command ($52='R' read)"; };
+LABEL { NAME "DSTATS"; ADDR $0303; COMMENT "status / direction"; };
+LABEL { NAME "DBUFLO"; ADDR $0304; COMMENT "data buffer lo"; };
+LABEL { NAME "DBUFHI"; ADDR $0305; COMMENT "data buffer hi"; };
+LABEL { NAME "DTIMLO"; ADDR $0306; COMMENT "timeout"; };
+LABEL { NAME "DBYTLO"; ADDR $0308; COMMENT "byte count lo"; };
+LABEL { NAME "DBYTHI"; ADDR $0309; COMMENT "byte count hi"; };
+LABEL { NAME "DAUX1";  ADDR $030A; COMMENT "sector # lo"; };
+LABEL { NAME "DAUX2";  ADDR $030B; COMMENT "sector # hi"; };
+
+# ---- OS entry points & vectors -----------------------------------------
+LABEL { NAME "SIOV";   ADDR $E459; COMMENT "SIO entry"; };
+LABEL { NAME "DSKINV"; ADDR $E453; COMMENT "disk handler entry"; };
+LABEL { NAME "DOSVEC"; ADDR $000A; };
+LABEL { NAME "DOSINI"; ADDR $000C; };
+LABEL { NAME "RUNAD";  ADDR $02E0; COMMENT "run vector - loader JMPs (RUNAD)"; };
+LABEL { NAME "INITAD"; ADDR $02E2; };
+LABEL { NAME "COLBK";  ADDR $D01A; };
+LABEL { NAME "NMIEN";  ADDR $D40E; };

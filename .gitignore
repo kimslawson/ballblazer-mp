@@ -14,11 +14,17 @@
 !/rom/README.md
 !/rom/.gitkeep
 
-# A full verbatim disassembly of the ROM is a derivative work of copyrighted
-# code - keep it local too.  Your annotated info file (disasm/ballblazer.info)
-# and patches ARE tracked; the generated listing is not.
+# Disk images and extracted sector/segment data are copyrighted too.
+*.atr
+*.img
+/build/disk/
+
+# A full verbatim disassembly of the ROM/disk is a derivative work of
+# copyrighted code - keep it local too.  Your annotated info files
+# (disasm/*.info) and patches ARE tracked; the generated listings are not.
 /disasm/ballblazer.s
 /build/ballblazer.s
+*.s.local
 
 # editor / OS cruft
 *~

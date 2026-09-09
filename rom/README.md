@@ -6,11 +6,17 @@ copyrighted (Lucasfilm Games / Atari) and must not be committed or shared.
 
 ## What to drop here
 
-- `ballblazer.rom` — a 16K Atari 8-bit Ballblazer cartridge image.
+Either form of a copy you own:
 
-The tools accept either a raw 16384-byte image or a dump with a 16-byte
-Atari `CART` header (magic `43 41 52 54`); `disasm/disasm.sh` detects the
-header and strips it automatically into `build/ballblazer.raw`.
+- `ballblazer.atr` — an Atari **disk** image (what most Ballblazer dumps are,
+  including the Internet Archive "k_file"). This is a custom-boot disk: a
+  3-sector loader at `$0700` that SIO-loads the game and jumps via `RUNAD`.
+  `disasm/disasm.sh` detects the ATR (magic `96 02`), unpacks it with
+  `tools/atr.py`, and disassembles the boot loader.
+- `ballblazer.rom` — a 16K **cartridge** image (raw 16384 bytes, or with a
+  16-byte `CART` header, magic `43 41 52 54`, which is stripped automatically).
+
+`disasm/disasm.sh` auto-detects which you have and picks the right workflow.
 
 ## Then
 

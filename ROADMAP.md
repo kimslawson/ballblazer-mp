@@ -23,14 +23,20 @@ needs your own legally-owned ROM.
       (`src/demo/netdemo.s`).
 - [x] PC-side virtual opponent + wire-format spec (`tools/vpeer.py`).
 
-## Phase 2 — Disassembly harness  `[x]` scaffolding / `(you)` on the real ROM
-- [x] `da65` control file with Atari cart structure + OS/hardware labels
-      (`disasm/ballblazer.info`).
-- [x] Disassemble / rebuild drivers (`disasm/disasm.sh`, `disasm/rebuild.sh`).
-- [x] Byte-identical round-trip **self-test** on a synthetic cart
-      (`tools/selftest_roundtrip.sh`) — proves the methodology.
-- [ ] `(you)` Run on your ROM; refine the info file until `make rebuild` says
-      IDENTICAL.
+## Phase 2 — Disassembly harness  `[x]` scaffolding / `(you)` on the full game
+- [x] ATR parser (`tools/atr.py`) — reads the boot record, unpacks sectors.
+- [x] **Disk image analyzed**: custom-boot `.atr`, 128-byte sectors, 276
+      sectors; 3-sector loader → `$0700`, exec `$0706`, init `$0714`; SIO reads
+      the game and hands off via `JMP (RUNAD)`.
+- [x] `da65` control files: disk boot loader (`disasm/disk-boot.info`) and 16K
+      cart (`disasm/ballblazer.info`), with SIO/DCB + OS/hardware labels.
+- [x] Auto-detecting disasm / rebuild drivers (`disasm/disasm.sh`,
+      `disasm/rebuild.sh`) for both disk and cart.
+- [x] **Boot loader disassembly verified byte-identical** on the real disk
+      (round-trip), and a synthetic-cart self-test proves the pipeline in CI.
+- [ ] `(you)` Map the SIO-loaded segments (follow the loader, or dump RAM from
+      atari800), then disassemble the resident game and refine the info files
+      until `make rebuild` stays IDENTICAL.
 
 ## Phase 3 — Reverse-engineer the seams  `(you)`
 - [ ] Seam A: locate the droid-AI / opponent-input hook (trace `RANDOM $D20A`,

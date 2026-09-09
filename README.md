@@ -100,8 +100,8 @@ disasm/      disk-boot.info + disk-boot.cfg   (the .atr boot loader)
              ballblazer.info + cart16k.cfg    (secondary: 16K cart path)
              disasm.sh, rebuild.sh            (auto-detect disk vs cart)
 cfg/         atari-xex.cfg (demo), atari-inject.cfg (patch)
-docs/        01 architecture · 02 FujiNet N: · 03 disassembly ·
-             04 netcode · 05 findings · 06 latency
+docs/        01 architecture · 02 FujiNet N: · 03 disassembly · 04 netcode ·
+             05 findings · 06 latency · 07 integration recipe
 rom/         (git-ignored) your own .atr goes here
 ROADMAP.md   phased plan + status
 ```

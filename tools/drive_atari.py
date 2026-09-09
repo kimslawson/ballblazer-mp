@@ -79,6 +79,11 @@ def main():
         elif verb == "show":
             send(proc, "SHOW")
             time.sleep(0.2)
+        elif verb == "mon":
+            # send a raw monitor command line (e.g. READ, D, M). Colons in the
+            # command are restored (they were split on the first ':').
+            send(proc, arg)
+            time.sleep(0.4)
         elif verb == "quit":
             send(proc, "QUIT")
         else:

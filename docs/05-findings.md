@@ -142,6 +142,26 @@ host simulate a match and diff while the ball is in flight). Neither blocks the
 patch:
 turns that cluster from "the `$F0–$FC` neighbourhood" into exact addresses.
 
+## Match-start: the one headless blocker
+
+Getting a live match running (which is what would make the plasmorb and scoring
+appear) could **not** be triggered headlessly. The title/idle state is stable
+(`SDLSTL=$2033`, both control selectors `$00`, menu vars `$C1=$C2=$FF`), and it
+did not transition under: forced console Start (held and as a press edge),
+forced triggers, forcing the attract flag `$B3` negative, or forcing the attract
+countdown `$33D8/$33D9` to expire. The input decode (`$5DA5`) reads the keyboard
+(`$5DB7`) only when a POKEY key IRQ is pending (`BIT $D20E` / `BVS`), so the
+start most likely waits on a **specific keyboard key** — not cheap to brute
+force headlessly. The fire-edge latch `$23E1` is consumed at `$67E8` (a lead,
+but that path looks gameplay-side). The game programs ANTIC's display list
+directly rather than via `SDLSTL`, so a screen-change probe is unavailable.
+
+Pragmatic resolution: start a match with **one keypress in a windowed
+`atari800`** (or crack the keyboard-start separately), then the automated
+`dump_ram.sh run` + `scan_findings.py diff` tools pin the ball and score
+variables exactly as the rotofoils were pinned. Everything else is done
+headlessly.
+
 ## Free RAM for injected code
 
 From the running image (`scan_findings.py` zero-run analysis):

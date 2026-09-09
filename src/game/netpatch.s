@@ -32,6 +32,7 @@
         .import   rem_xi, rem_xf, rem_yi, rem_yf
 
         .export   netp_install, netp_post, net_mode
+        .export   netp_capture_local, netp_apply_remote
 
 XITVBV  = $E462
 

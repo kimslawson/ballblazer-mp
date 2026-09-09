@@ -58,10 +58,12 @@ needs your own legally-owned disk image.
 - [x] Integration patch written (`src/game/netpatch.s` + `gameaddr.inc`):
       net-match install, VBI-exit wedge, capture-local / apply-remote. Builds to
       a **667-byte** blob (`make patch`), continuously checked in `make test`.
-- [x] **Hook proven in the real running game** (emulator loopback): a VBI-exit
-      wedge driving player 2's kinematics from an injected "received" buffer —
-      P2 vars took the injected values ($80/$8E/$FB). This is the netcode's
-      apply-remote path minus the live `N:` transport.
+- [x] **Hook proven in the real running game** with the ACTUAL committed
+      `netp_apply_remote` (not a stub): the 667-byte blob loaded into RAM, hooked
+      at the VBI exit, drove P2's kinematics ($80/$8E/$FB) from the netcode's
+      `rem_*` fields. This is the apply-remote path minus the live `N:` transport.
+- [x] Empirical latency study (`tools/netsim.py`, `make sim`) and a completion
+      recipe (`docs/07-integration.md`).
 - [x] Netcode CPU cost measured (`make bench`): ~80/347/347 cyc — <2.5% of a
       frame. Latency analysis in `docs/06-latency.md`.
 - [ ] Refine the var mapping (position/velocity/heading split) and the

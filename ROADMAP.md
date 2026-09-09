@@ -4,7 +4,7 @@ Turning single-player Ballblazer (Atari 8-bit) into a two-machine FujiNet
 network match. This is the living plan and status board.
 
 Legend: `[x]` done & verified · `[~]` in progress · `[ ]` not started · `(you)`
-needs your own legally-owned ROM.
+needs your own legally-owned disk image.
 
 ## Phase 0 — Foundation & tooling  `[x]`
 - [x] Project scaffold, build orchestration (`Makefile`), CI entry point
@@ -81,6 +81,6 @@ needs your own legally-owned ROM.
 - Exact Ballblazer coordinate units (resolved at Seam B; scaling is a knob).
 - FujiNet UDP transmit-destination SPECIAL command number varies by firmware —
   confirm against current FujiNet NOS docs (see `docs/02`).
-- Free ROM/RAM budget for the added code (the net layer is small — ~0.5 KB — but
+- Free RAM budget for the added code (the net layer is ~667 bytes — but
   measure once integrated).
 - Internet (vs. LAN) play needs port-forwarding or a relay.

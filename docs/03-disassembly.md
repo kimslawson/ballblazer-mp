@@ -2,11 +2,13 @@
 
 The goal of this phase is an **annotated, byte-exact** disassembly you can
 modify and reassemble. "Byte-exact" is the objective correctness test: if the
-reassembled image differs from your ROM by even one byte, you have not yet
+reassembled image differs from your image by even one byte, you have not yet
 correctly separated code from data.
 
-No ROM or disassembly is committed to this repo (see the `.gitignore` and
-`LICENSE`). You do this locally on a copy you own.
+No game image or disassembly is committed to this repo (see the `.gitignore` and
+`LICENSE`). You do this locally on a copy you own. This project targets the
+Atari 8-bit **`.atr` disk** release (Internet Archive "Regulation Certified"
+dump); the cartridge path below is secondary.
 
 ## Prerequisites
 

@@ -100,5 +100,9 @@ bench: dirs
 	  echo "$$s: $$((c/1000)) cyc/call (of 29868 per NTSC frame)"; \
 	done
 
+# ---- link latency/loss simulation ------------------------------------------
+sim:
+	@$(PY) tools/netsim.py
+
 clean:
 	rm -rf $(BUILD)

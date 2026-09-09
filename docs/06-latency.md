@@ -64,6 +64,30 @@ Ballblazer helps here: the rotofoil has **momentum and auto-snaps** to face the
 ball/goal, so motion is smooth and predictable — the ideal case for dead
 reckoning. It is not a twitch game.
 
+### Simulated, not just argued (`tools/netsim.py`)
+
+A headless simulation of the netcode algorithm (60 fps, 20 Hz sends, per-frame
+dead reckoning, snap-on-packet) measures how far the opponent's craft is
+*displayed* from its true position, in grid units (the craft tops out ~2.5
+units/frame; the field is a few hundred units across, so single digits are
+imperceptible and ~30+ reads as a visible correction):
+
+| one-way | realistic play (glide+turns) mean / max | worst case (always turning) mean / max |
+|--------:|:---------------------------------------:|:--------------------------------------:|
+| 8 ms (LAN)      | 2.4 / 2.4 | 6.1 / 6.2 |
+| 25 ms           | 2.5 / 5.4 | 6.5 / 7.2 |
+| 50 ms           | 4.8 / 7.6 | 12.5 / 13.0 |
+| 100 ms (internet) | 11.7 / 14.6 | 30.3 / 31.0 |
+| 150 ms          | 18.3 / 21.7 | 47.5 / 48.3 |
+
+The error is **concentrated at turns** (steady glides contribute ~0 — the mirror
+extrapolates them exactly) and scales with latency + the 50 ms send interval.
+10% packet loss barely moves the mean; it mostly raises the max (a dropped
+packet extends the extrapolation through a turn — e.g. glide+turns at 100 ms
+goes 14.6 → 33.3 max). Bottom line: **LAN is effectively perfect; internet
+latencies stay very playable for the rotofoils**, which is exactly what dead
+reckoning buys on a momentum game.
+
 ## The plasmorb is the sensitive part
 
 The ball is fast and its possession/shots are discrete events, so it tolerates

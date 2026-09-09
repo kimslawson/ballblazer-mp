@@ -31,6 +31,9 @@ python3 tools/xex.py build/netdemo.bin build/netdemo.xex 2000 >/dev/null && echo
 step "vpeer protocol self-test"
 python3 tools/vpeer.py --selftest || fail=1
 
+step "link simulation smoke run"
+python3 tools/netsim.py >/dev/null && echo "PASS" || fail=1
+
 step "injected patch builds (netpatch + netgame + ncio)"
 ca65 -t none -I src/common -I src/net -I src/game src/game/netpatch.s -o build/netpatch.o
 ca65 -t none -I src/common -I src/net src/net/netgame.s -o build/ng_i.o

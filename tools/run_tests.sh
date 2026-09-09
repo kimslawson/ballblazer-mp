@@ -31,5 +31,12 @@ python3 tools/xex.py build/netdemo.bin build/netdemo.xex 2000 >/dev/null && echo
 step "vpeer protocol self-test"
 python3 tools/vpeer.py --selftest || fail=1
 
+step "injected patch builds (netpatch + netgame + ncio)"
+ca65 -t none -I src/common -I src/net -I src/game src/game/netpatch.s -o build/netpatch.o
+ca65 -t none -I src/common -I src/net src/net/netgame.s -o build/ng_i.o
+ca65 -t none -I src/common -I src/net src/net/ncio.s -o build/ncio_i.o
+ld65 -C cfg/atari-inject.cfg -o build/netpatch.blob build/netpatch.o build/ng_i.o build/ncio_i.o \
+  && echo "PASS ($(stat -c%s build/netpatch.blob) bytes)" || fail=1
+
 printf '\n========================================\n'
 if [ "$fail" -eq 0 ]; then echo "ALL CHECKS PASSED"; else echo "SOME CHECKS FAILED"; exit 1; fi

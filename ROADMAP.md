@@ -54,15 +54,21 @@ needs your own legally-owned ROM.
       position-vs-velocity split. See docs/05.
 - [x] Free RAM for injection identified (page 6, `$094A–$0B3D`, reclaimable AI).
 
-## Phase 4 — Integration  `(you, with this repo's code)`
-- [ ] Add a "network match" mode: `ng_init` + open `N:`, force two-rotofoil
-      rendering.
-- [ ] Seam A: write `rem_*` into the opponent-rotofoil variables each frame in
-      place of the droid output.
-- [ ] Seam B: host drives `ball_*`; client renders from `ball_*`.
-- [ ] Copy the game's real vars in/out around `ng_tick`; calibrate the
-      fixed-point velocity scale (see docs/04 "one tuning knob").
-- [ ] Route goals/possession through the packet event field.
+## Phase 4 — Integration  `[~]` in progress
+- [x] Integration patch written (`src/game/netpatch.s` + `gameaddr.inc`):
+      net-match install, VBI-exit wedge, capture-local / apply-remote. Builds to
+      a **667-byte** blob (`make patch`), continuously checked in `make test`.
+- [x] **Hook proven in the real running game** (emulator loopback): a VBI-exit
+      wedge driving player 2's kinematics from an injected "received" buffer —
+      P2 vars took the injected values ($80/$8E/$FB). This is the netcode's
+      apply-remote path minus the live `N:` transport.
+- [x] Netcode CPU cost measured (`make bench`): ~80/347/347 cyc — <2.5% of a
+      frame. Latency analysis in `docs/06-latency.md`.
+- [ ] Refine the var mapping (position/velocity/heading split) and the
+      capture/apply field wiring in `netpatch.s`.
+- [ ] Ball authority: host drives `ball_*`; pin the ball variables.
+- [ ] Live `N:` transport on hardware / `fujinet-pc`; route goals/possession
+      through the packet event field; calibrate the fixed-point scale.
 
 ## Phase 5 — Hardening & play  `(you)`
 - [ ] Connection UI / lobby (enter host IP; or a small relay for internet play).

@@ -80,5 +80,25 @@ findings: dirs
 	@echo "## memory map ##";     python3 tools/scan_findings.py map $(BUILD)/disk/ram_run.bin
 	@echo; echo "## I/O seams ##"; python3 tools/scan_findings.py io  $(BUILD)/disk/ram_run.bin
 
+# ---- injected network patch (netpatch + netgame + ncio) --------------------
+patch: dirs
+	$(CA65) -t none $(INCS) -I src/game src/game/netpatch.s -o $(BUILD)/netpatch.o
+	$(CA65) -t none $(INCS) src/net/netgame.s -o $(BUILD)/ng_i.o
+	$(CA65) -t none $(INCS) src/net/ncio.s    -o $(BUILD)/ncio_i.o
+	$(LD65) -C cfg/atari-inject.cfg -o $(BUILD)/netpatch.blob \
+	        $(BUILD)/netpatch.o $(BUILD)/ng_i.o $(BUILD)/ncio_i.o
+	@echo "injected patch footprint: $$(stat -c%s $(BUILD)/netpatch.blob) bytes"
+
+# ---- netcode CPU cycle microbench (sim65) ----------------------------------
+bench: dirs
+	$(CA65) -t sim6502 -D UNIT_TEST $(INCS) src/net/netgame.s -o $(BUILD)/ng_b.o
+	$(CA65) -t sim6502 $(INCS) src/net/ncio.s -o $(BUILD)/ncio_b.o
+	@for s in BENCH_DR BENCH_TX BENCH_RX; do \
+	  $(CA65) -t sim6502 -D $$s $(INCS) tests/bench_netgame.s -o $(BUILD)/bench.o; \
+	  $(LD65) -t sim6502 -o $(BUILD)/bench.prg $(BUILD)/bench.o $(BUILD)/ng_b.o $(BUILD)/ncio_b.o sim6502.lib; \
+	  c=$$(sim65 --cycles $(BUILD)/bench.prg 2>&1 | grep -ioE "[0-9]+ cycles" | grep -oE "[0-9]+"); \
+	  echo "$$s: $$((c/1000)) cyc/call (of 29868 per NTSC frame)"; \
+	done
+
 clean:
 	rm -rf $(BUILD)

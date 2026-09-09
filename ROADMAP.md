@@ -46,8 +46,12 @@ needs your own legally-owned ROM.
 - [x] Seam A located: per-player input at `$5F3D`/`$5F7A` (+ triggers
       `$5F46`/`$5F85`); droid-AI PRNG cluster `$5E24–$5E61`.
 - [x] Seam C located: menu console read at `$5DBD` (`CONSOL`).
-- [~] Seam B: zero-page candidates found (`$00B5,$00F1,$00F4,$00F7…`); still
-      need to **pin** rotofoil/ball vars with in-game motion diffs.
+- [~] Seam B: headless input-injection tool (`tools/drive_atari.py`) works;
+      candidates narrowed to the `$00F0–$00FC` block (music-engine noise —
+      `$B6,$C6,$CB,$D4`, pairs `$D9≡$FE`,`$DA≡$FF` — excluded). **Definitive
+      pinning needs an in-match capture** (attract→match start trigger not yet
+      isolated headlessly; the `$B3` state machine at `$5D74`/`$5BCD` is the
+      lead). See docs/05 "Seam-B pinning".
 - [x] Free RAM for injection identified (page 6, `$094A–$0B3D`, reclaimable AI).
 
 ## Phase 4 — Integration  `(you, with this repo's code)`

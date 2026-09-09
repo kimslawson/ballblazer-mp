@@ -75,6 +75,54 @@ motion**: start a match, capture two dumps a few frames apart while a rotofoil
 glides, and diff — the bytes that track the glide are the position/velocity
 vars. `tools/dump_ram.sh run` + `scan_findings.py diff` is that workflow.
 
+## Seam-B pinning — method, tooling, and status
+
+**Tooling delivered:** `tools/drive_atari.py` drives the `atari800` monitor
+headlessly to inject input by *patching the input-read instruction in RAM* —
+e.g. rewrite `LDA $D300` (3 bytes) to `LDA #imm; NOP` so a read returns a chosen
+value. Boot → SIGINT-break → `C`-patch → run → `WRITE`-dump all work; the method
+is proven.
+
+**What was established about the front end:**
+- The resident main loop at `$4C72` is a passive spinner: `LDA $B3 / BPL` around
+  `INC $B5` — real logic runs in the vertical-blank interrupt.
+- `$B3` is the attract wait-flag: written at `$4C88`, and decremented by the
+  menu state machine at `$5BD7` / `$5D7E` (guarded by `BIT $B3` at `$5BCD` /
+  `$5D74`, next to the `$5DBD` console read).
+- The `$5DBD` (CONSOL) and `$5F3D`/`$5F7A` (PORTA) reads and the `$5F46`/`$5F85`
+  triggers are **not executed during attract** — forcing each to "pressed", and
+  forcing `$B3` negative, did **not** leave the attract loop. So the
+  attract→match start input travels a path still to be located in that VBI state
+  machine.
+
+**Why attract diffs are noisy — the music engine.** Ballblazer's signature
+algorithmic music runs continuously in attract and churns zero page every frame.
+From a 6-snapshot timeline (`scan_findings.py`-style), classify:
+- **Almost certainly music state (exclude from Seam B):** `$B6`, `$C6`, `$CB`,
+  `$D4` (change every frame, large steps), and the mirror pairs `$D9`≡`$FE`,
+  `$DA`≡`$FF`.
+- **Weak position/velocity candidates (small, intermittent steps):** `$D6`,
+  `$D8`, `$F2`, `$F5`, `$F8`, and the `$F0–$FC` block generally — **unconfirmed**
+  without in-match motion.
+
+**To pin them definitively (needs an in-match capture):**
+1. Get into a match. Either finish reversing the start trigger (follow the
+   `$B3` state machine at `$5D74`/`$5BCD` to the routine that begins a match), or
+   run `atari800` once *with a display*, press Start to begin a 1- or 2-player
+   game, then use the automated tools below.
+2. With a rotofoil gliding under a held direction, capture two dumps a few
+   frames apart and `scan_findings.py diff`. The byte that ramps monotonically
+   is that axis' **position**; a steady non-zero neighbour is its **velocity**;
+   the value tracking snap-to-target is **heading**. Force one axis at a time
+   (`drive_atari.py … patch:5F3D:A9,FE,EA` for up, `…,F7,…` for right) to label
+   axes.
+3. Record the confirmed addresses in the `docs/04-netcode.md` mapping table.
+
+The patch does not need axis-perfect labels up front: once in-match diffs
+isolate the **player-2 rotofoil variable cluster**, the netcode overwrites those
+bytes from `rem_*` (and the host drives the ball cluster). The pinning above
+turns that cluster from "the `$F0–$FC` neighbourhood" into exact addresses.
+
 ## Free RAM for injected code
 
 From the running image (`scan_findings.py` zero-run analysis):

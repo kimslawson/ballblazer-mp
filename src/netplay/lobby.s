@@ -22,7 +22,7 @@
         .include "game.inc"
 
         .import cfg_role, cfg_delay, cfg_baud, rnd0, rnd1
-        .import hook, idle, irq, prng, mix
+        .import hook, idle, irq, prng, mix, dli_a, dli_b
         .import v_porta, v_trig0, v_trig1, v_consol, v_kbcode, v_irqst, sink
         .import net_mode, pkt_ready, txbuf, rxbuf, finish_pkt, tx_start, tx_busy
         .import hw_init
@@ -33,6 +33,9 @@
 .ifndef TEST
 TEST = 0
 .endif
+.ifndef NOFUJI
+NOFUJI = 0                      ; 1 = serial-driver test build: no FujiNet
+.endif                          ;     commands, role taken from cfg_role
 
 VERSION   = 1                   ; protocol version (HELLO)
 PORT      = 6502                ; UDP port, both ends
@@ -66,6 +69,13 @@ start:
         ldx #>m_banner
         jsr print
 
+        lda PAL                 ; PAL machines need a different divisor
+        and #$0E                ;   for the same 2400 baud
+        bne :+
+        lda #106
+        sta cfg_baud
+:
+.if NOFUJI = 0
         ; ---- who are we? ask FujiNet for the adapter configuration
         lda #$E8                ; GET ADAPTER CONFIG -> 140 bytes
         ldy #$40                ; read
@@ -138,9 +148,7 @@ start:
         lda PAL
         and #$0E
         bne @ntsc
-        lda #106                ; PAL: 2400 baud divisor, and tell FujiNet
-        sta cfg_baud
-        lda #$10
+        lda #$10                ; tell FujiNet this is a PAL machine
         sta fbuf,x
 @ntsc:  lda cfg_baud
         sta fbuf+1,x
@@ -158,7 +166,9 @@ start:
         jsr print
         jsr pause
         jmp G_START
-:       lda #<m_wait
+:
+.endif
+        lda #<m_wait
         ldx #>m_wait
         jsr print
 
@@ -351,6 +361,8 @@ patches:
         P_JMP   G_TICK, hook            ; every tick goes through the lockstep gate
         P_JMP   G_IDLE_JMP, idle        ; main loop runs with IRQs enabled
         P_JMP   G_SND_COMMIT, mix       ; sound: keep POKEY voices 3+4 for serial
+        P_OPND  G_DLI_CALL_1, dli_a     ; long work at the end of each display
+        P_OPND  G_DLI_CALL_2, dli_b     ;   kernel runs with IRQs enabled
         P_OPND  G_RD_PORTA_1, v_porta   ; controllers come from the input streams
         P_OPND  G_RD_PORTA_2, v_porta
         P_OPND  G_RD_TRIG0,   v_trig0

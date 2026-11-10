@@ -50,11 +50,11 @@
         .include "game.inc"
 
         .export cfg_role, cfg_delay, cfg_baud, rnd0, rnd1
-        .export hook, idle, irq, prng, mix
+        .export hook, idle, irq, prng, mix, dli_a, dli_b
         .export v_porta, v_trig0, v_trig1, v_consol, v_kbcode, v_irqst, sink
         .export net_mode, pkt_ready, txbuf, rxbuf, finish_pkt, tx_start, tx_busy
         .export hw_init, sample
-        .export l_wr, l_base, r_wr, seq, tick
+        .export l_wr, l_base, r_wr, seq, tick, err_cnt
 
 .ifndef TEST
 TEST = 0
@@ -69,8 +69,8 @@ RRING     = $0140               ; their inputs, indexed by tick & 63
                                 ; (bottom of the stack page; the game's stack
                                 ;  never comes within 100 bytes of it)
 .if TEST
-TXBOX     = $01B8               ; [len][bytes..]  written here, rig collects
-RXBOX     = $01C4               ; [len][bytes..]  rig delivers, we consume
+TXBOX     = $0AD0               ; [len][bytes..]  written here, rig collects
+RXBOX     = $0AE0               ; [len][bytes..]  rig delivers, we consume
 T_O       = 100                 ; host retransmit timeout, frames
 TEST_STOP_EN = $0AF0            ; (a page the game clears and never uses)
 TEST_STOP    = $0AF1
@@ -95,6 +95,30 @@ idle:   cli
         jmp G_IDLE
 
 ; ---------------------------------------------------------------------------
+; dli_a / dli_b - each view's display kernel (a display-list interrupt that
+; owns the CPU for 51 scanlines, 3.3 ms) ends by calling a long table-update
+; routine, still inside the interrupt and so with IRQs masked - on alternate
+; frames that adds up to ~11 ms. A serial byte lasts 4.2 ms, so that would
+; lose data. The kernel proper is over by then; let IRQs back in.
+; (If the kernel happened to interrupt our own IRQ handler, enabling IRQs here
+; would re-enter it; the routine is then handed to that handler to run on its
+; way out - see the end of `irq`.)
+; ---------------------------------------------------------------------------
+dli_a:  ldx #0
+        beq dli_go
+dli_b:  ldx #1
+dli_go: lda in_irq              ; did this kernel interrupt our IRQ handler?
+        bne @defer              ;   then IRQs must stay masked until it is
+        cli                     ;   done - it runs the routine itself, later
+        txa
+        bne :+
+        jmp G_DLI_WORK_1
+:       jmp G_DLI_WORK_2
+@defer: inx
+        stx dli_pending         ; 1 / 2 = which routine is owed
+        rts
+
+; ---------------------------------------------------------------------------
 ; hook - replaces the first two instructions of the game's logic tick.
 ; Entered with G_BUSY = $FF (the game's own re-entrancy guard), from the VBI
 ; or from the main loop's catch-up path.
@@ -110,19 +134,23 @@ hook:   lda in_irq              ; did the VBI land inside our IRQ handler?
         jsr test_poll
 .endif
         ; ---- link housekeeping (never while the IRQ handler is mid-flight)
-        inc rx_idle             ; a packet's bytes are <10 ms apart: two
-        lda rx_idle             ; silent frames mean the fragment is dead
+        php                     ; a packet's bytes are <10 ms apart: two
+        sei                     ; silent frames mean the fragment is dead
+        inc rx_idle             ; (masked: a byte arriving in between must
+        lda rx_idle             ;  not have its packet thrown away)
         cmp #2
         bcc :+
         lda #0
         sta rx_n
-:       bit cfg_role
+:       plp
+        bit cfg_role
         bmi @client
         inc since_rx            ; host: nothing heard for a while -> (re)send
         lda since_rx
         cmp #T_O
         bcc @busy
-        lda tx_busy
+        lda tx_busy             ; never talk over our own transmission ...
+        ora rx_n                ; ... or a packet that is still arriving
         bne @busy
         sta since_rx            ; A = 0
         php
@@ -141,6 +169,7 @@ hook:   lda in_irq              ; did the VBI land inside our IRQ handler?
         and #$1F
         bne @busy
         lda tx_busy
+        ora rx_n
         bne @busy
         php
         sei
@@ -188,10 +217,10 @@ hook:   lda in_irq              ; did the VBI land inside our IRQ handler?
         ldy RRING,x
         bit cfg_role
         bpl :+
-        sta tmp_run             ; client: we are player 2
+        sta h_tmp               ; client: we are player 2
         tya
-        ldy tmp_run
-:       sta tmp_code            ; A = player 1, Y = player 2
+        ldy h_tmp
+:       sta h_tmp               ; A = player 1, Y = player 2
         lda #7
         sta v_cons
         lda #$FF
@@ -204,7 +233,7 @@ hook:   lda in_irq              ; did the VBI land inside our IRQ handler?
         asl a
         asl a
         sta v_porta
-        lda tmp_code
+        lda h_tmp
         ldx #0
         jsr one
         ora v_porta
@@ -278,11 +307,13 @@ rx_byte:
         jsr csum
         ldx tmp_n
         cmp rxbuf,x
-        bne @ret
+        bne @bad
         lda net_mode
         bne pkt_rx
         inc pkt_ready           ; lobby: just flag it
 @ret:   rts
+@bad:   inc err_cnt             ; (diagnostic: damaged packets seen)
+        rts
 
 ; pkt_rx: a valid packet is in rxbuf (game mode)
 pkt_rx: lda rxbuf
@@ -467,15 +498,13 @@ tx_start:
         lda #SK_SEND
         sta SKCTL
         sta tx_busy
-        lda #0
-        sta IRQEN
-        lda txbuf
-        sta SEROUT
         lda #1
         sta tx_pos
-        lda #IRQ_SEROUT
-        sta irqen
-        sta IRQEN
+        lda #IRQ_SEROUT         ; arm the "next byte" interrupt BEFORE the
+        sta irqen               ;   first byte goes out: POKEY raises it the
+        sta IRQEN               ;   moment that byte enters the shifter, and
+        lda txbuf               ;   an event that finds its enable bit clear
+        sta SEROUT              ;   is lost for good
         rts
 
 ; hw_init: (re)claim POKEY after the game's own init wiped it
@@ -524,6 +553,7 @@ irq:    inc in_irq
         beq :+
         lda #$80                ; poison the packet until the line goes idle
         sta rx_n
+        inc err_cnt
 :       lda SERIN
         jsr rx_byte
         jmp @done
@@ -555,19 +585,28 @@ irq:    inc in_irq
         lda #SK_RECV            ; line turnaround: back to listening
         sta SKCTL
         sta SKRES
-        lda #0
-        sta IRQEN
-        sta tx_busy
-        sta rx_n
-        lda #IRQ_SERIN
+        lda #IRQ_SERIN          ; (one write: drops XMTDON, arms receive)
         sta irqen
         sta IRQEN
-@done:  pla
+        lda #0
+        sta tx_busy
+        sta rx_n
+@done:  dec in_irq
+        ldx dli_pending         ; a display kernel left its closing routine
+        beq @exit               ;   to us (see dli_a): run it now, with IRQs
+        lda #0                  ;   enabled - our own work is finished
+        sta dli_pending
+        cli
+        dex
+        bne :+
+        jsr G_DLI_WORK_1
+        jmp @exit
+:       jsr G_DLI_WORK_2
+@exit:  pla
         tay
         pla
         tax
         pla
-        dec in_irq
         rti
 .endif
 
@@ -728,6 +767,9 @@ tmp_x:      .res 1
 tmp_i:      .res 1
 tmp_code:   .res 1
 tmp_run:    .res 1
+dli_pending:.res 1         ; display routine owed by the IRQ handler (0/1/2)
+h_tmp:      .res 1         ; the hook's own scratch: tmp_* belong to the
+                           ;   protocol code, which runs in IRQ context
 v_cons:     .res 1
 ; what the patched game reads instead of the hardware
 v_porta:    .res 1
@@ -736,6 +778,7 @@ v_trig1:    .res 1
 v_consol:   .res 1
 v_kbcode:   .res 1
 v_irqst:    .res 1
+err_cnt:    .res 1         ; damaged bytes/packets (diagnostic only)
 sink:       .res 1         ; writes we do not want reach POKEY land here
 txbuf:      .res 10
 rxbuf:      .res 10

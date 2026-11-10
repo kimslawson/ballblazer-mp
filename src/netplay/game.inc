@@ -64,3 +64,9 @@ G_LATCH_2    = $5C76
 ; simulation depends on, at a moment that differs per machine. Netplay puts the
 ; intended target back.
 G_BAD_CATCHUP = $A439    ; JSR $4C41  (should be JSR G_TICK)
+
+; display kernels: the last thing each one does is JSR to a long routine
+G_DLI_CALL_1  = $5BF5    ; JSR G_DLI_WORK_1   (player-1 view)
+G_DLI_CALL_2  = $5D9C    ; JSR G_DLI_WORK_2   (player-2 view)
+G_DLI_WORK_1  = $7F56
+G_DLI_WORK_2  = $80CC

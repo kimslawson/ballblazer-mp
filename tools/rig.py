@@ -67,6 +67,7 @@ class Rig:
         self.in_monitor = False
         self.fed = 0
         self.buf = b""
+        self._fd = None
         # held input state (applied to every frame fed until changed)
         self.joy = ["", "", "", ""]
         self.trig = [False] * 4
@@ -263,45 +264,58 @@ class Rig:
         pad = (-(self.fed - 8)) % BLOCK
         if pad:
             self.feed(pad)
-        end = time.time() + timeout
-        while time.time() < end:
-            n = struct.unpack("i", fcntl.ioctl(self.w, termios.FIONREAD,
-                                               b"\0\0\0\0"))[0]
-            got = self._read_some(0.001)       # keep the pty drained
-            if got:
-                self.buf = (self.buf + got)[-2000:]
-            if n == 0:
-                time.sleep(0.004)
-                got = self._read_some(0.001)
-                return self.fed
-        raise TimeoutError("emulator did not consume queued frames")
+        self._wait_blocked(timeout)
+        return self.fed
 
     @property
     def frame(self):
         return self.fed
 
+    def _fifo_fd(self):
+        """The emulator's file descriptor for our input pipe."""
+        d = "/proc/%d/fd" % self.p.pid
+        for n in os.listdir(d):
+            try:
+                if os.readlink(os.path.join(d, n)) == self.fifo:
+                    return int(n)
+            except OSError:
+                pass
+        raise RuntimeError("emulator has not opened the input pipe")
+
+    def _wait_blocked(self, timeout=180):
+        """Wait until the emulator is asleep in read() on the input pipe, i.e.
+        it has executed every frame it was given and is starved for more."""
+        if self._fd is None:
+            self._fd = self._fifo_fd()
+        path = "/proc/%d/syscall" % self.p.pid
+        end = time.time() + timeout
+        while time.time() < end:
+            got = self._read_some(0.0005)      # keep the pty drained
+            if got:
+                self.buf = (self.buf + got)[-2000:]
+                continue
+            try:
+                f = open(path).read().split()
+            except OSError:
+                raise RuntimeError("emulator exited; it said: %r"
+                                   % self.buf[-400:])
+            if len(f) > 1 and f[0] == "0" and int(f[1], 16) == self._fd:
+                return
+        raise TimeoutError("emulator never went idle")
+
     def brk(self):
-        """Enter the monitor at a frame boundary. Costs one 16-frame slice: one
-        frame runs before the monitor opens, the other 15 stay buffered and run
-        on the next CONT/step."""
+        """Enter the monitor at a frame boundary. Costs one 16-frame slice.
+
+        The emulator is only ever signalled while it is blocked on the input
+        pipe: atari800 5.0 services SIGINT wherever it happens to be, which is
+        not safe mid-frame or inside the monitor."""
         if self.in_monitor:
             return
         self.sync()
         self.p.send_signal(signal.SIGINT)
-        time.sleep(0.01)
+        time.sleep(0.002)
         self.feed(BLOCK)
-        for attempt in range(6):
-            try:
-                self._wait_prompt(3)
-                break
-            except TimeoutError:
-                # the signal can be swallowed if it lands while the emulator
-                # is still leaving the monitor; ask again
-                self.p.send_signal(signal.SIGINT)
-                time.sleep(0.01)
-                self.feed(BLOCK)
-        else:
-            raise TimeoutError("emulator does not enter the monitor")
+        self._wait_prompt(30)
         self.in_monitor = True
 
     def until(self, addr, max_frames=600):

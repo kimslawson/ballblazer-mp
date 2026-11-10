@@ -18,7 +18,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from rig import Rig  # noqa: E402
 
-TXBOX, RXBOX = 0x01B8, 0x01C4
+TXBOX, RXBOX = 0x0AD0, 0x0AE0
 STOP_EN, STOP = 0x0AF0, 0x0AF1
 
 
@@ -36,7 +36,7 @@ def build(delay, seed):
     def sh(*a):
         subprocess.run(a, cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
     for src, obj in (("resident", "res1"), ("lobby", "lob1")):
-        sh("ca65", "-t", "none", "-D", "TEST=1", "-I", "src/netplay",
+        sh("ca65", "-g", "-t", "none", "-D", "TEST=1", "-I", "src/netplay",
            "src/netplay/%s.s" % src, "-o", "build/np/%s.o" % obj)
     sh("ld65", "-C", "cfg/netplay.cfg", "-Ln", "build/np/np1.lbl",
        "-o", "build/np/np1", "build/np/res1.o", "build/np/lob1.o")
@@ -67,11 +67,11 @@ class Link:
         self.c.__exit__(*a)
 
     def state(self, r):
-        m = r.dump(0x0180, 0x01CF)
+        m = r.dump(0x0180, 0x01BF)
+        b = r.dump(TXBOX, RXBOX)
         g = lambda n: m[self.L[n] - 0x180]
         return dict(tick=g("tick"), l_wr=g("l_wr"), l_base=g("l_base"),
-                    r_wr=g("r_wr"), tx=m[TXBOX - 0x180:TXBOX - 0x180 + 11],
-                    rxlen=m[RXBOX - 0x180])
+                    r_wr=g("r_wr"), tx=b[0:11], rxlen=b[RXBOX - TXBOX])
 
     def exchange(self):
         """Move mailbox contents across. Returns (host state, client state)."""

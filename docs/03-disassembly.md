@@ -132,45 +132,43 @@ runs anywhere) by:
 make selftest        # byte-identical round-trip, no ROM required
 ```
 
-## Step 5 — find the three seams
+## Step 5 — what the netplay patch needed to know
 
-For the **disk** build this is done; the shared map lives in
-[`disasm/ballblazer-resident.info`](../disasm/ballblazer-resident.info) (run it
-against your own `build/disk/ram_run.bin` — see that file's header). Rather than
-a memory watch, the seams were pinned by **controlled input injection** in
-`atari800` (`tools/drive_atari.py`): force a player's control gate onto the
-joystick path, inject a stick direction, and keep the bytes whose delta reverses
-sign — see [`docs/05-findings.md`](05-findings.md). Status:
+The patch does not need a full disassembly — lockstep only needs the places
+where the simulation touches the outside world. Those are recorded as facts in
+[`docs/04-findings.md`](04-findings.md), as equates in
+`src/netplay/game.inc`, and as labels in
+[`disasm/ballblazer-resident.info`](../disasm/ballblazer-resident.info) (run
+`da65 -i` on it against your own `build/disk/ram_run.bin` for an annotated
+local listing).
 
-- **Seam A — opponent AI/input hook.** ✅ Located. Per-player control selectors
-  `$23DE`/`$33DE` (0 = joystick, ≠0 = droid), gates `$5F27`/`$5F64`, droid AI
-  `$9A4A` (X=`$00`/`$14`), called at `$5F37`/`$5F74`. The remote player's
-  `JSR $9A4A` (`$5F74`) is where network state is applied instead.
-- **Seam B — state variables.** ✅ Rotofoils pinned. P1 fwd/back
-  `$F1:$F2`/`$F4:$F5`/`$F8`, lateral `$12D1`; P2 fwd/back
-  `$7E/$80/$8E/$90`, lateral `$FB`. ⏳ The **plasmorb** vars are not active in
-  the title state (both selectors 0, no ball) — capture them from a real
-  in-flight match and diff.
-- **Seam C — mode select + scoring.** ◐ Partial. 1P/2P mode is encoded in the
-  selectors themselves and set up around `$5E02–$5E91`; input reads are labelled
-  (`$5DB7` keyboard, `$5DBD` console). ⏳ The **score vars** and **goal / match-
-  over** routines still need an in-match capture (leads: a "first to 10"
-  `CMP #$0A`, and the match countdown timer).
+The generated listing (`build/disk/resident.s`) is **not** tracked — it is a
+derivative of copyrighted code; the understanding lives in the `.info` file,
+the findings and the patch sources.
 
-Every confirmed address is recorded as a `LABEL` in the tracked resident map, so
-it becomes the shared understanding of the ROM. The generated listing
-(`build/disk/resident.s`) is **not** tracked — it is a derivative of copyrighted
-code; your understanding lives in the `.info` file and the patch sources.
+## Working in the emulator
 
-## Useful `atari800` monitor commands
+`tools/rig.py` wraps the stock `atari800` 5.0 for this kind of work:
 
-Launch with the monitor available and use, e.g.:
+```python
+from rig import Rig
+with Rig("rom/ballblazer.atr") as r:
+    r.step(700)                    # exactly 700 frames
+    r.step(8, start=True)          # START held for 8 frames -> a match begins
+    r.step(120, joy0="U")          # player 1 pushes forward for two seconds
+    r.shot("build/shots/x.png")    # what the screen looks like
+    ram = r.dump()                 # all 64 KB
+    r.until(0x4CBE)                # run to the next tick
+    r.save("build/disk/match.a8s") # emulator save state
+```
 
-- `SHOW` — registers; `C` — continue; `S` — step.
-- watchpoints on the addresses above to catch the AI and state reads.
+Input goes in through the emulator's `-playback` file (a pipe the rig feeds
+frame by frame), so joysticks, triggers and console keys pass through the
+emulated PIA/GTIA like real ones — no instruction patching. The stock monitor
+has PC breakpoints (`BPC`) but no memory watchpoints or trace; to catch a
+stray write, save a state every block, detect the change, restore, and step
+tick by tick (that is how the damaged byte in `docs/04-findings.md` was found).
 
-## Emulator note
-
-`atari800` (5.x) does not emulate a FujiNet `N:` device, so it can run the game
-and the RE, but not the live link. Test networking with `tools/vpeer.py` against
-real FujiNet hardware or a FujiNet-aware setup (see the README).
+`atari800` does not emulate a FujiNet. The emulator tests therefore replace
+the *wire* (two RAM mailboxes, or a cassette image standing in for the remote
+machine); see `docs/06-playing.md` for what that does and does not prove.

@@ -1,32 +1,32 @@
 # rom/ — put your own Ballblazer disk image here
 
-This directory is where **you** place a Ballblazer copy you legally own, so the
-disassembly tools can read it. It is deliberately **git-ignored**: the game is
-copyrighted (Lucasfilm Games / Atari) and must not be committed or shared.
+This directory is where **you** place a Ballblazer copy you legally own. It is
+deliberately **git-ignored**: the game is copyrighted (Lucasfilm Games / Atari)
+and must not be committed or shared. Nothing you put here leaves your machine.
 
-## What to drop here
+## The supported image
 
-- **`ballblazer.atr`** — the Atari 8-bit **disk image** this project targets
-  (the "Regulation Certified" dump on the Internet Archive). It is a
-  single-density, 128-byte-sector, **custom-boot** disk: a 3-sector loader at
-  `$0700` SIO-loads the game into `$4000–$BFFF` and starts it via `RUNAD`.
-  `disasm/disasm.sh` detects the ATR (magic `96 02`), unpacks it with
-  `tools/atr.py`, and disassembles the boot loader.
+**`ballblazer.atr`** — the Atari 8-bit "Regulation Certified" disk image:
 
-Secondary (only if you happen to have the cartridge release instead):
+- 35,344 bytes (16-byte header + 276 sectors of 128 bytes)
+- md5 `a37afb54b6edbd03c348efa0b714d37c`
 
-- `ballblazer.rom` — a 16K **cartridge** image (raw 16384 bytes, or with a
-  16-byte `CART` header, magic `43 41 52 54`, stripped automatically). Handled
-  by `disasm/ballblazer.info` + `cart16k.cfg`.
+`tools/mkdisk.py` checks the md5, and the lobby checks a checksum of the game
+in memory before it patches anything: the patch is a list of addresses, and
+they are only right for this dump. Other dumps of the same release (the
+Internet Archive also has an "[a]" alternate) are refused.
 
-`disasm/disasm.sh` auto-detects which you have and picks the right workflow.
+Structurally it is three boot sectors holding a small binary-file loader,
+followed by one ordinary Atari binary-load stream (`docs/04-findings.md`).
 
 ## Then
 
 ```sh
-make disasm      # unpack + da65 the boot loader (disk) or the cart image
-make rebuild     # reassemble and prove it is byte-identical
-make dump-run    # capture the resident game (disk) -> build/disk/ram_run.bin
+make disk        # build/ballblazer-net.atr - the netplay disk
+make nptest      # the emulator tests (optional)
+make disasm      # unpack + disassemble the boot loader (reverse engineering)
+make dump-run    # capture the running game -> build/disk/ram_run.bin
 ```
 
-Nothing you put here leaves your machine.
+(If you have a 16K **cartridge** dump instead, `rom/ballblazer.rom` still works
+with the disassembly harness, but the netplay patch does not support it.)

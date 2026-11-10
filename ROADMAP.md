@@ -1,88 +1,64 @@
 # Roadmap
 
-Turning single-player Ballblazer (Atari 8-bit) into a two-machine FujiNet
-network match. This is the living plan and status board.
+Two-machine Ballblazer over FujiNet. Legend: `[x]` done and verified ·
+`[ ]` open · `(hw)` needs real hardware.
 
-Legend: `[x]` done & verified · `[~]` in progress · `[ ]` not started · `(you)`
-needs your own legally-owned disk image.
+## Done
 
-## Phase 0 — Foundation & tooling  `[x]`
-- [x] Project scaffold, build orchestration (`Makefile`), CI entry point
-      (`tools/run_tests.sh`).
-- [x] Toolchain pinned: cc65 (`ca65`/`ld65`/`da65`/`sim65`) + `dasm` + `atari800`.
-- [x] `.gitignore` / `LICENSE` establishing the ROM copyright boundary.
+- [x] **Tooling.** `tools/rig.py` drives the stock `atari800` frame by frame
+      with real joystick/console/keyboard input, monitor access and
+      screenshots. Disassembly harness with a byte-exact round-trip self-test.
+- [x] **Reverse engineering** of everything lockstep needs
+      (`docs/04-findings.md`): the load format, the tick and its two calling
+      contexts, every hardware read inside it, the display kernels' interrupt
+      behaviour, free memory, and a damaged byte in the supported dump.
+- [x] **Design.** Deterministic lockstep over FujiNet NetStream at 2400 baud,
+      half duplex, stop-and-wait (`docs/01`, `docs/02`, `docs/05`). The earlier
+      state-overwrite design over the `N:` device was dropped: SIO cannot run
+      while this game's display interrupts hold the CPU.
+- [x] **Resident netplay code** (`src/netplay/resident.s`, 922 of 1024 bytes):
+      tick gate, input virtualisation, seeded PRNG, per-tick facing latch,
+      interrupt-driven serial driver, protocol, sound mixing.
+- [x] **Lobby** (`src/netplay/lobby.s`): image check, own address, opponent
+      address, host/join, input delay, handshake, RAM patching; plain RETURN
+      plays the untouched local game.
+- [x] **Disk builder** (`tools/mkdisk.py`) and **PC peer** (`tools/vpeer.py`).
+- [x] **Lockstep proven in emulation** (`make nplock`): two linked emulators,
+      30 % loss, all 64 KB compared on common ticks.
+- [x] **Serial driver and lobby proven in emulation** (`make npserial`): the
+      production code against a cassette image playing the remote machine,
+      both roles, no packet lost.
 
-## Phase 1 — FujiNet networking layer  `[x]`
-- [x] Low-level `N:` CIO wrapper — OPEN/CLOSE/STATUS/GET/PUT, all non-blocking
-      (`src/net/ncio.s`).
-- [x] Link protocol: 16-byte packet, checksum, non-blocking drain, dead
-      reckoning, host/client ball authority (`src/net/netgame.s`).
-- [x] Executable unit tests on `sim65` — 24 assertions, all passing
-      (`tests/test_netgame.s`).
-- [x] Standalone, bootable link demo `.xex` (host + client)
-      (`src/demo/netdemo.s`).
-- [x] PC-side virtual opponent + wire-format spec (`tools/vpeer.py`).
+## Next — on hardware
 
-## Phase 2 — Disassembly harness  `[x]` scaffolding / `(you)` on the full game
-- [x] ATR parser (`tools/atr.py`) — reads the boot record, unpacks sectors.
-- [x] **Disk image analyzed**: custom-boot `.atr`, 128-byte sectors, 276
-      sectors; 3-sector loader → `$0700`, exec `$0706`, init `$0714`; SIO reads
-      the game and hands off via `JMP (RUNAD)`.
-- [x] `da65` control files: disk boot loader (`disasm/disk-boot.info`) and 16K
-      cart (`disasm/ballblazer.info`), with SIO/DCB + OS/hardware labels.
-- [x] Auto-detecting disasm / rebuild drivers (`disasm/disasm.sh`,
-      `disasm/rebuild.sh`) for both disk and cart.
-- [x] **Boot loader disassembly verified byte-identical** on the real disk
-      (round-trip), and a synthetic-cart self-test proves the pipeline in CI.
-- [ ] `(you)` Map the SIO-loaded segments (follow the loader, or dump RAM from
-      atari800), then disassemble the resident game and refine the info files
-      until `make rebuild` stays IDENTICAL.
+- [ ] `(hw)` One Atari + FujiNet against `vpeer.py`: do the two FujiNet
+      commands behave as the firmware source reads? Does the handshake
+      complete? Does `resent` stay near zero?
+- [ ] `(hw)` Two Ataris: a full match. Find the smallest input delay that
+      does not stutter on a normal home network.
+- [ ] `(hw)` Listen to it. Decide whether the effect voices sharing voice 2
+      is acceptable or needs a smarter mix.
+- [ ] `(hw)` A PAL machine, and PAL against NTSC (the faster machine should
+      simply wait for the slower).
 
-## Phase 3 — Reverse-engineer the seams  `[x]` (headless dump + controlled input)
-- [x] Headless capture path: `atari800` (SDL dummy) monitor dumps via
-      `tools/dump_ram.sh` / `tools/drive_atari.py`; scanner `tools/scan_findings.py`.
-- [x] Memory map established: engine resident `$4000–$BFFF`; VBI `$4CAB` runs the
-      logic while the main PC idles at `$4C72`.
-- [x] Seam A **fully located**: per-player control selectors `$23DE` (P1) /
-      `$33DE` (P2), gates `$5F27` / `$5F64`; joystick reads `$5F3D`/`$5F7A`;
-      **droid AI entry `$9A4A`** (X=`$00`/`$14`) — the remote player's `JSR $9A4A`
-      is the primary net hook.
-- [x] Seam C located: menu console read `$5DBD`; keyboard `$5DB7`.
-- [x] Seam B **pinned by controlled input** (force gate + inject stick, keep
-      sign-reversing bytes): P1 fwd/back `$F1:$F2,$F4:$F5,$F8`, lateral `$12D1`;
-      P2 fwd/back `$7E/$80/$8E/$90/$A5–$AD`, lateral `$FB`. Remaining: ball vars,
-      position-vs-velocity split. See docs/05.
-- [x] Free RAM for injection identified (page 6, `$094A–$0B3D`, reclaimable AI).
+## Later
 
-## Phase 4 — Integration  `[~]` in progress
-- [x] Integration patch written (`src/game/netpatch.s` + `gameaddr.inc`):
-      net-match install, VBI-exit wedge, capture-local / apply-remote. Builds to
-      a **667-byte** blob (`make patch`), continuously checked in `make test`.
-- [x] **Hook proven in the real running game** with the ACTUAL committed
-      `netp_apply_remote` (not a stub): the 667-byte blob loaded into RAM, hooked
-      at the VBI exit, drove P2's kinematics ($80/$8E/$FB) from the netcode's
-      `rem_*` fields. This is the apply-remote path minus the live `N:` transport.
-- [x] Empirical latency study (`tools/netsim.py`, `make sim`) and a completion
-      recipe (`docs/07-integration.md`).
-- [x] Netcode CPU cost measured (`make bench`): ~80/347/347 cyc — <2.5% of a
-      frame. Latency analysis in `docs/06-latency.md`.
-- [ ] Refine the var mapping (position/velocity/heading split) and the
-      capture/apply field wiring in `netpatch.s`.
-- [ ] Ball authority: host drives `ball_*`; pin the ball variables.
-- [ ] Live `N:` transport on hardware / `fujinet-pc`; route goals/possession
-      through the packet event field; calibrate the fixed-point scale.
+- [ ] A visible "waiting for opponent" cue when the game stalls, and a way
+      back to the lobby without a power cycle.
+- [ ] A desync detector (a few bytes of state hash in the packet header's
+      spare bit) — cheap insurance, not needed by any test so far.
+- [ ] Full-duplex link (transmit clock on voice 2): halves the round trip and
+      allows a delay of 3, at the cost of a second sound voice.
+- [ ] A relay (`REGISTER` mode) for play across the internet without port
+      forwarding.
+- [ ] Support the "[a]" dump, if someone has it: check whether its byte at
+      `$A43A` is intact and whether the patch addresses match.
 
-## Phase 5 — Hardening & play  `(you)`
-- [ ] Connection UI / lobby (enter host IP; or a small relay for internet play).
-- [ ] Loss/latency polish: seq-ordering, easing instead of hard snap, jitter
-      buffer sizing.
-- [ ] Disconnect detection + pause/resume.
-- [ ] Playtest on real Ataris + FujiNet; tune send rate and dead-reckoning.
+## Known risks
 
-## Known unknowns / risks
-- Exact Ballblazer coordinate units (resolved at Seam B; scaling is a knob).
-- FujiNet UDP transmit-destination SPECIAL command number varies by firmware —
-  confirm against current FujiNet NOS docs (see `docs/02`).
-- Free RAM budget for the added code (the net layer is ~667 bytes — but
-  measure once integrated).
-- Internet (vs. LAN) play needs port-forwarding or a relay.
+- NetStream is used as read from the firmware source; nothing here has
+  talked to a real FujiNet.
+- The receive margin is 0.9 ms (4.16 ms byte time against a 3.26 ms display
+  kernel). The emulator says it holds; real hardware has the last word.
+- Older FujiNet firmware has the UDP-stream command but not baud selection;
+  it will not work and the lobby can only show that by never connecting.

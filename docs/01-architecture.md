@@ -67,7 +67,7 @@ Choosing "local game" in the lobby (just RETURN) applies none of this.
 |---|---|
 | `$BC00–$BFFF` | resident code. Held the original tape loader; dead once the game runs. 922 of 1024 bytes used. |
 | `$0224–$02F8` | second resident chunk, copied there at launch. OS variables, unused after the game takes over (it never calls the OS). |
-| `$0180–$01B9` | link state. Bottom of the stack page; the game's stack stays above `$01D0`. |
+| `$0180–$01B9` | link state. Bottom of the stack page; the lowest stack pointer seen in play is `$EE`. |
 | `$0100–$017F` | the two input rings (64 ticks each). |
 | `$2000–…` | the lobby. Free at load time; reclaimed by the game afterwards. |
 

@@ -92,7 +92,8 @@ input code:      bits 0-3 joystick as PORTA reads it (0 = pushed), or a key
                  1 START  2 SELECT  3 OPTION  4 SPACE  8 ESC  12 RETURN
                  bit 4    trigger pressed
 
-checksum:        a = $A5; for each byte: a ^= byte; a = rol-less (a << 1) + $1D + carry
+checksum:        a = $A5; for each byte: a ^= byte, then a = (a << 1) + $1D + (the bit
+                 shifted out), all modulo 256
 ```
 
 A typical packet is three bytes (12.5 ms on the wire).

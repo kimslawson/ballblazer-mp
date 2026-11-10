@@ -29,3 +29,6 @@
 # editor / OS cruft
 *~
 .DS_Store
+
+# python
+__pycache__/

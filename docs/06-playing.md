@@ -61,6 +61,24 @@ python3 tools/vpeer.py join 192.168.1.50 # the Atari's address; answer H there
 On the Atari, enter the PC's IP as the opponent's address. vpeer prints a
 status line every two seconds (ticks, packets, resends).
 
+## Emulators with a FujiNet
+
+An emulator can stand in for a real Atari + FujiNet if **all three** hold:
+
+1. its Atari core relays NetStream over NetSIO — current `atari800` does
+   (raw serial bytes are forwarded once command `$F0` was acknowledged, the
+   motor line is on, `AUDCTL` has voices 3+4 joined at 1.79 MHz, and `SKCTL`
+   is in mode `$00`, `$10`, `$30` or `$40`; this patch uses `$13`/`$43`);
+2. the FujiNet-PC it talks to is built from firmware v1.6.0 or later;
+3. each emulated machine is on a **different IP address** — both ends listen
+   on UDP 6502, so two instances on one computer collide.
+
+Fujisan (libatari800 + a bundled FujiNet-PC) fits that shape; whether a given
+release has points 1 and 2 depends on what it bundles. Serving the `.atr`
+from TNFS is fine: the game is fully loaded before NetStream starts and the
+disk is never touched again. An emulator does not exercise real POKEY timing,
+so it tests the FujiNet side and the protocol, not the 0.9 ms receive margin.
+
 ## What is verified, and how
 
 | claim | evidence | status |

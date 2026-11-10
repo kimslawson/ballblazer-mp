@@ -59,5 +59,10 @@ IRQ_SEROUT = $10         ; serial output byte needed
 IRQ_XMTDON = $08         ; serial output complete (not latched)
 
 ; SKCTL values (bits 0-1 keep the keyboard scan running)
-SK_RECV = $13            ; async receive clocked by ch3+4 (as the OS does)
-SK_SEND = $23            ; transmit clocked by ch4
+SK_RECV = $13            ; receive asynchronously, clocked by voices 3+4
+SK_SEND = $43            ; transmit clocked by voice 4; receive side parked on
+                         ;   the (absent) external clock. The OS uses $23 to
+                         ;   send, which transmits identically; $43 is chosen
+                         ;   because the atari800 NetSIO core (and so Fujisan)
+                         ;   only relays NetStream bytes in modes $00/$10/
+                         ;   $30/$40.

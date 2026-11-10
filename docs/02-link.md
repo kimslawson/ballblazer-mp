@@ -55,7 +55,7 @@ exercised against a real FujiNet in this repository — see `docs/06-playing.md`
 | `AUDCTL` | `$28` | voice 3 clocked at 1.79 MHz, voices 3+4 joined: the baud generator |
 | `AUDF3/AUDF4` | 109 (106 PAL) / 1 | 2400 baud |
 | `AUDC3/AUDC4` | 0 | silent |
-| `SKCTL` | `$13` to listen, `$23` to talk | the same two modes the OS uses |
+| `SKCTL` | `$13` to listen, `$43` to talk | `$13` is the OS's receive mode; `$43` sends on the same clock as the OS's `$23` and is a mode emulators accept as NetStream |
 | `IRQEN` | one of `$20` / `$10` / `$08` | receive ready / send next / send complete |
 
 **2400 baud** is deliberate. With the patch the longest stretch with IRQs

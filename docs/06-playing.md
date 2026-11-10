@@ -3,9 +3,11 @@
 ## You need
 
 - Two Atari 8-bit computers (48K 800 or any XL/XE), NTSC or PAL, each with a
-  **FujiNet** on recent firmware — it must have *NetStream* with a selectable
-  baud rate (the `$F0` command taking flags and an AUDF3 byte). If your
-  firmware is older the lobby's handshake simply never completes; update it.
+  **FujiNet** on firmware **v1.6.0 or later** (released 2026-05-01). That is
+  the release where the old fixed-19200 "UDP stream" became *NetStream*, with
+  the baud-rate byte and motor-line gating this patch relies on. On v1.5.x
+  and earlier the `$F0` command exists but the FujiNet talks 19200 baud to
+  our 2400, so the lobby's handshake never completes; update it.
 - Both FujiNets on the same network (or UDP port 6502 forwarded to each).
 - Your own copy of the Ballblazer disk image this patch supports (see
   `rom/README.md`). Both players must use the same image.

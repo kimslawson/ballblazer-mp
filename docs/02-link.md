@@ -13,8 +13,9 @@ could not have worked on real hardware.
 
 ## NetStream
 
-Current FujiNet firmware has a raw serial ⇄ network bridge, **NetStream**
-(the descendant of the "UDP stream" mode made for MIDI Maze). Once enabled,
+FujiNet firmware from **v1.6.0** on has a raw serial ⇄ network bridge,
+**NetStream** (the descendant of the fixed-19200 "UDP stream" mode made for
+MIDI Maze; the conversion is firmware commit `e57e16c2b`, PR #1276). Once enabled,
 every byte the Atari shifts out of POKEY is forwarded in a UDP datagram to a
 configured host, and every datagram received is clocked into the Atari's
 serial input at the line rate. No command frames, no handshake.

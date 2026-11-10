@@ -60,5 +60,6 @@ Two-machine Ballblazer over FujiNet. Legend: `[x]` done and verified ·
   talked to a real FujiNet.
 - The receive margin is 0.9 ms (4.16 ms byte time against a 3.26 ms display
   kernel). The emulator says it holds; real hardware has the last word.
-- Older FujiNet firmware has the UDP-stream command but not baud selection;
-  it will not work and the lobby can only show that by never connecting.
+- FujiNet firmware before v1.6.0 has the UDP-stream command but not baud
+  selection; it will not work and the lobby can only show that by never
+  connecting.

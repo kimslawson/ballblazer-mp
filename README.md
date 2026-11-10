@@ -60,7 +60,7 @@ player answers **H**, the other **J**. Full instructions and troubleshooting:
 ## Requirements
 
 - Atari 400/800 with 48K, or any XL/XE; NTSC or PAL (PAL untested).
-- FujiNet firmware with NetStream and selectable baud rate (recent builds).
+- FujiNet firmware v1.6.0 or later (the first release with NetStream).
 - The supported disk image — one specific dump, checked by checksum
   ([`rom/README.md`](rom/README.md)).
 

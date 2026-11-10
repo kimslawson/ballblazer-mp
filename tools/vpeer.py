@@ -1,208 +1,233 @@
 #!/usr/bin/env python3
-"""vpeer - a virtual Ballblazer-MP opponent that speaks the wire protocol.
+"""vpeer - a PC stand-in for the second Atari.
 
-Lets you test ONE Atari + FujiNet against a PC (no second Atari needed).  It
-receives the 16-byte state packets the Atari sends, validates them exactly like
-netgame.s does, and replies with its own packets driving a "bot" rotofoil in a
-slow circle so the remote craft visibly moves on the Atari's screen.
+Speaks the Ballblazer netplay protocol over UDP, the way a FujiNet in
+NetStream mode relays it: every datagram is a run of raw serial bytes. Point
+ONE real Atari + FujiNet at this computer's address and you can test the whole
+link - lobby handshake, lockstep, loss recovery - before a second Atari is
+involved. The PC "player" cannot see the game; it just wanders about and
+shoots now and then, which is enough to see the opponent's rotofoil move and
+the match stay alive.
 
-This file is also the executable spec of the packet format in fujinet.inc; keep
-the two in sync.  `--selftest` runs offline checks (no socket) and is used by
-tools/run_tests.sh / CI.
+    vpeer.py join <atari-ip>      Atari hosts (answer H there); PC is player 2
+    vpeer.py host                 Atari joins (answer J there); PC is player 1
+    vpeer.py selftest             no network: two endpoints over a lossy pipe
 
-Examples:
-    # Atari built as CLIENT dials this machine; we act as HOST (ball authority):
-    tools/vpeer.py --listen 5000 --host
-
-    # Atari built as HOST listens; we act as CLIENT dialing the Atari:
-    tools/vpeer.py --connect 192.168.1.77:5000
+On the Atari, enter this computer's IP address as the opponent's address.
+Both ends use UDP port 6502.
 """
 import argparse
-import math
+import random
 import socket
 import sys
 import time
 
-PKT_LEN = 16
-# byte offsets (mirror fujinet.inc)
-MAGIC, SEQ, ACK, FLAGS = 0, 1, 2, 3
-RFX, RFXF, RFY, RFYF = 4, 5, 6, 7
-RFVX, RFVY, RFHDG = 8, 9, 10
-BALLX, BALLY, BALLST, EVENT, CSUM = 11, 12, 13, 14, 15
+import npproto as P
 
-PROTO_MAGIC = 0xB1
-FLAG_HOST = 0x01
-FLAG_HAVEBALL = 0x02
+TICK = 1 / 59.92          # NTSC frame
+T_O = 8 * TICK            # host retransmit timeout (as on the Atari)
+BEACON = 32 * TICK        # client START / HELLO repeat
 
 
-def checksum(buf):
-    """XOR of bytes 0..14 - identical to ng_csum in netgame.s."""
-    c = 0
-    for i in range(CSUM):
-        c ^= buf[i]
-    return c & 0xFF
+class Player:
+    """Lockstep bookkeeping for one side: mirrors the Atari's tick hook."""
+
+    def __init__(self, host, delay, pilot):
+        self.ep = P.Endpoint(host, delay)
+        self.tick = 0
+        self.pilot = pilot
+
+    def advance(self):
+        """Run every tick whose remote input has arrived; queue ours."""
+        n = 0
+        while self.tick < len(self.ep.remote) and \
+                len(self.ep.local) - self.ep.l_base < 56:
+            self.ep.push(self.pilot(self.tick + self.ep.delay))
+            self.tick += 1
+            n += 1
+        return n
 
 
-def build(seq, ack, flags, x, y, vx, vy, hdg, bx=0, by=0, bst=0, event=0):
-    p = bytearray(PKT_LEN)
-    p[MAGIC] = PROTO_MAGIC
-    p[SEQ] = seq & 0xFF
-    p[ACK] = ack & 0xFF
-    p[FLAGS] = flags & 0xFF
-    p[RFX] = x & 0xFF
-    p[RFY] = y & 0xFF
-    p[RFVX] = vx & 0xFF
-    p[RFVY] = vy & 0xFF
-    p[RFHDG] = hdg & 0xFF
-    p[BALLX] = bx & 0xFF
-    p[BALLY] = by & 0xFF
-    p[BALLST] = bst & 0xFF
-    p[EVENT] = event & 0xFF
-    p[CSUM] = checksum(p)
-    return bytes(p)
+def wander(seed, press_start_at=None):
+    """A blind pilot: mostly forward, some turns, the odd shot."""
+    rnd = random.Random(seed)
+    state = {"c": P.NEUTRAL, "until": 0}
+
+    def pilot(t):
+        if press_start_at is not None and press_start_at <= t < press_start_at + 8:
+            return P.code(key="start")
+        if t >= state["until"]:
+            state["c"] = P.code(rnd.choice(["U", "U", "U", "UL", "UR", "L", "R", ""]),
+                                trig=rnd.random() < 0.15)
+            state["until"] = t + rnd.randint(10, 60)
+        return state["c"]
+    return pilot
 
 
-def parse(buf):
-    if len(buf) < PKT_LEN:
-        return None, "short"
-    if buf[MAGIC] != PROTO_MAGIC:
-        return None, "bad-magic"
-    if checksum(buf) != buf[CSUM]:
-        return None, "bad-checksum"
-    return {
-        "seq": buf[SEQ], "ack": buf[ACK], "flags": buf[FLAGS],
-        "x": buf[RFX], "y": buf[RFY],
-        "vx": u8_to_s8(buf[RFVX]), "vy": u8_to_s8(buf[RFVY]),
-        "hdg": buf[RFHDG], "ballx": buf[BALLX], "bally": buf[BALLY],
-        "ballst": buf[BALLST], "event": buf[EVENT],
-    }, None
+def run(args):
+    host = args.mode == "host"
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("", args.port))
+    sock.settimeout(0.002)
+    peer = (args.atari, args.port) if args.atari else None
+    par = P.Parser()
+    delay = args.delay
+    seed = random.randrange(1, 65536)
+    print("vpeer: %s on UDP %d%s" % (
+        "hosting (PC = player 1)" if host else "joining (PC = player 2)",
+        args.port, "" if peer else ", waiting for the Atari to call"))
 
+    def send(pkt):
+        if peer:
+            sock.sendto(pkt, peer)
 
-def u8_to_s8(b):
-    return b - 256 if b >= 128 else b
+    # ---- lobby ------------------------------------------------------------
+    last = 0.0
+    welcomed = False
+    while True:
+        now = time.time()
+        if not host and now - last > BEACON:
+            send(P.packet(P.T_HELLO, bytes([P.VERSION, P.GAME_SUM & 255,
+                                            P.GAME_SUM >> 8])))
+            last = now
+        try:
+            data, src = sock.recvfrom(64)
+        except socket.timeout:
+            continue
+        peer = src
+        got = None
+        for p in par.feed(data):
+            got = p
+        if got is None:
+            continue
+        kind = got[0] & 7
+        if host and kind == P.T_HELLO:
+            body = got[1:-1]
+            if body[0] != P.VERSION or body[1] | body[2] << 8 != P.GAME_SUM:
+                print("vpeer: the Atari runs a different version/image")
+                continue
+            send(P.packet(P.T_WELCOME, bytes([seed & 255 | 1, seed >> 8, delay])))
+            welcomed = True
+            print("vpeer: HELLO from %s - WELCOME sent (delay %d)" % (src[0], delay))
+        elif host and kind == P.T_START and welcomed:
+            break
+        elif not host and kind == P.T_WELCOME:
+            delay = got[3]
+            send(P.packet(P.T_START))
+            print("vpeer: WELCOME from %s (delay %d) - START sent" % (src[0], delay))
+            break
+
+    # ---- game -------------------------------------------------------------
+    pl = Player(host, delay, wander(seed, press_start_at=600 if host else None))
+    ep = pl.ep
+    t0 = time.time()
+    heard = 0.0 if host else time.time()
+    beacon = time.time()
+    stats = dict(rx=0, tx=0, resend=0)
+    shown = time.time()
+    last_byte = time.time()
+    while True:
+        now = time.time()
+        # our clock: never run ahead of real time, never past the peer's inputs
+        while pl.tick < (now - t0) / TICK:
+            if not pl.advance():
+                t0 += TICK          # stalled: wall time does not count
+                break
+        if host and now - heard > T_O:
+            send(ep.kick())
+            stats["tx"] += 1
+            stats["resend"] += ep.tx is not None and heard > 0
+            heard = now
+        if not host and not ep.got_data and now - beacon > BEACON:
+            send(P.packet(P.T_START))
+            beacon = now
+        try:
+            data, src = sock.recvfrom(64)
+        except socket.timeout:
+            data = b""
+        if data:
+            if now - last_byte > 0.035:
+                par.idle()
+            last_byte = now
+            for p in par.feed(data):
+                stats["rx"] += 1
+                reply = ep.on_packet(p)
+                if reply:
+                    send(reply)
+                    stats["tx"] += 1
+                    heard = now
+        if now - shown > 2:
+            print("vpeer: tick %6d  peer inputs to %6d  rx %d tx %d resent %d"
+                  % (pl.tick, len(ep.remote), stats["rx"], stats["tx"],
+                     stats["resend"]))
+            shown = now
 
 
 def selftest():
-    ok = True
-
-    def check(cond, msg):
-        nonlocal ok
-        print(("  ok  " if cond else " FAIL ") + msg)
-        ok = ok and cond
-
-    # checksum matches the documented 6502 algorithm on a known vector
-    v = bytes([0xB1, 0x01, 0x00, 0x01, 0x11, 0x22, 0x33, 0x44,
-               0x05, 0xFB, 0x40, 0, 0, 0, 0])
-    expect = 0
-    for b in v:
-        expect ^= b
-    check(checksum(v + bytes([0])) == expect, "checksum XOR of bytes 0..14")
-
-    # build -> parse round-trips
-    p = build(seq=5, ack=4, flags=FLAG_HOST, x=0x11, y=0x33,
-              vx=5, vy=-5, hdg=0x40)
-    d, err = parse(p)
-    check(err is None, "valid packet accepted")
-    check(d and d["x"] == 0x11 and d["y"] == 0x33, "x/y parsed")
-    check(d and d["vx"] == 5 and d["vy"] == -5, "signed velocity parsed")
-    check(d and (d["flags"] & FLAG_HOST), "host flag parsed")
-
-    # tampering is rejected
-    bad = bytearray(p)
-    bad[CSUM] ^= 0xFF
-    _, err = parse(bytes(bad))
-    check(err == "bad-checksum", "corrupt checksum rejected")
-    bad = bytearray(p)
-    bad[MAGIC] = 0x00
-    _, err = parse(bytes(bad))
-    check(err == "bad-magic", "bad magic rejected")
-
-    print("SELFTEST:", "PASS" if ok else "FAIL")
-    return 0 if ok else 1
-
-
-def run(sock, peer, is_host, hz):
-    print(f"vpeer up as {'HOST' if is_host else 'CLIENT'}; "
-          f"peer={peer or 'first sender'}; {hz} Hz")
-    period = 1.0 / hz
-    seq = 0
-    last_ack = 0
-    cx, cy, r = 128.0, 128.0, 40.0     # bot flies a circle around grid centre
-    theta = 0.0
-    ballx, bally = 128, 128
-    t_next = time.time()
-    sock.settimeout(period)
-    while True:
-        # drain inbound
-        try:
-            while True:
-                data, addr = sock.recvfrom(256)
-                if peer is None:
-                    peer = addr
-                    print("peer discovered:", peer)
-                d, err = parse(data)
-                if err:
-                    print("  rx drop:", err)
-                    continue
-                last_ack = d["seq"]
-                print(f"  rx seq={d['seq']:3d} pos=({d['x']:3d},{d['y']:3d}) "
-                      f"v=({d['vx']:+d},{d['vy']:+d}) hdg={d['hdg']:3d} "
-                      f"flags={d['flags']:08b}")
-        except socket.timeout:
-            pass
-        except BlockingIOError:
-            pass
-
-        # send our state on schedule
-        now = time.time()
-        if now >= t_next and peer is not None:
-            t_next = now + period
-            seq = (seq + 1) & 0xFF
-            theta += 0.15
-            x = int(cx + r * math.cos(theta)) & 0xFF
-            y = int(cy + r * math.sin(theta)) & 0xFF
-            vx = int(-r * math.sin(theta) * 0.15)
-            vy = int(r * math.cos(theta) * 0.15)
-            flags = FLAG_HOST | FLAG_HAVEBALL if is_host else 0
-            pkt = build(seq, last_ack, flags, x, y, vx, vy,
-                        int(theta * 40) & 0xFF, ballx, bally,
-                        FLAG_HAVEBALL if is_host else 0)
-            sock.sendto(pkt, peer)
+    """Two endpoints over a lossy, reordering-free pipe: each side must end up
+    with exactly the other's inputs, in order."""
+    rnd = random.Random(1)
+    for loss in (0.0, 0.3):
+        h = Player(True, 4, wander(11))
+        c = Player(False, 4, wander(22))
+        ph, pc = P.Parser(), P.Parser()
+        wire_hc, wire_ch = [], []
+        quiet = 99
+        for step in range(40000):
+            h.advance()
+            c.advance()
+            if wire_hc:
+                for p in pc.feed(wire_hc.pop(0)):
+                    r = c.ep.on_packet(p)
+                    if r and rnd.random() >= loss:
+                        wire_ch.append(r)
+            elif wire_ch:
+                for p in ph.feed(wire_ch.pop(0)):
+                    r = h.ep.on_packet(p)
+                    quiet = 0
+                    if r and rnd.random() >= loss:
+                        wire_hc.append(r)
+            else:
+                quiet += 1
+                if quiet > 8:                      # host timeout
+                    quiet = 0
+                    if rnd.random() >= loss:
+                        wire_hc.append(h.ep.kick())
+            if h.tick > 3000 and c.tick > 3000:
+                break
+        n = min(len(h.ep.remote), len(c.ep.local), 3000)
+        m = min(len(c.ep.remote), len(h.ep.local), 3000)
+        ok = (h.ep.remote[:n] == c.ep.local[:n] and
+              c.ep.remote[:m] == h.ep.local[:m] and n > 2900 and m > 2900)
+        print("selftest loss %.0f%%: host has %d of client's inputs, client has "
+              "%d of host's - %s" % (loss * 100, n, m, "PASS" if ok else "FAIL"))
+        if not ok:
+            return 1
+    # wire format spot checks (must match src/netplay/resident.s)
+    assert P.packet(P.T_DATA, bytes([0x8F])) == bytes([0x08, 0x8F, 0x0C])
+    assert P.packet(0x80 | P.T_DATA, bytes([0x8F])) == bytes([0x88, 0x8F, 0x0E])
+    assert P.unrle(P.rle([15] * 5 + [14] * 9)[0]) == [15] * 5 + [14] * 9
+    print("wire format: PASS")
+    return 0
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    g = ap.add_mutually_exclusive_group()
-    g.add_argument("--listen", metavar="PORT", type=int,
-                   help="bind this UDP port and wait for the Atari to send")
-    g.add_argument("--connect", metavar="IP:PORT",
-                   help="send to this Atari address")
-    ap.add_argument("--host", action="store_true",
-                    help="act as the ball authority (set FLAG_HOST)")
-    ap.add_argument("--hz", type=int, default=20, help="send rate (default 20)")
-    ap.add_argument("--selftest", action="store_true",
-                    help="run offline protocol checks and exit")
+                                 formatter_class=argparse.RawTextHelpFormatter)
+    ap.add_argument("mode", choices=["host", "join", "selftest"])
+    ap.add_argument("atari", nargs="?", help="the Atari's FujiNet address (join)")
+    ap.add_argument("--port", type=int, default=P.PORT)
+    ap.add_argument("--delay", type=int, default=5,
+                    help="input delay in frames when hosting (3-9)")
     args = ap.parse_args()
-
-    if args.selftest:
+    if args.mode == "selftest":
         sys.exit(selftest())
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    peer = None
-    if args.listen:
-        sock.bind(("0.0.0.0", args.listen))
-    elif args.connect:
-        ip, port = args.connect.split(":")
-        peer = (ip, int(port))
-        sock.bind(("0.0.0.0", 0))
-    else:
-        ap.error("one of --listen or --connect is required (or --selftest)")
-
+    if args.mode == "join" and not args.atari:
+        ap.error("join needs the Atari's address")
     try:
-        run(sock, peer, args.host, args.hz)
+        run(args)
     except KeyboardInterrupt:
-        print("\nbye")
+        pass
 
 
 if __name__ == "__main__":

@@ -271,6 +271,17 @@ class Rig:
     def frame(self):
         return self.fed
 
+    # Atari keyboard codes (what KBCODE reads) for the characters tests type
+    KEYCODE = {"0": 0x32, "1": 0x1F, "2": 0x1E, "3": 0x1A, "4": 0x18,
+               "5": 0x1D, "6": 0x1B, "7": 0x33, "8": 0x35, "9": 0x30,
+               ".": 0x22, "\n": 0x0C, " ": 0x21, "H": 0x39, "J": 0x01}
+
+    def type(self, text, hold=4, gap=6):
+        """Type characters on the Atari keyboard (see KEYCODE)."""
+        for ch in text:
+            self.step(hold, key=self.KEYCODE[ch.upper()])
+            self.step(gap)
+
     def _fifo_fd(self):
         """The emulator's file descriptor for our input pipe."""
         d = "/proc/%d/fd" % self.p.pid

@@ -1,110 +1,85 @@
-# Architecture: turning single-player Ballblazer into a network match
+# Architecture
 
-This document explains what Ballblazer is doing internally (from public,
-community knowledge — no ROM contents are reproduced here) and exactly where a
-network opponent replaces the built-in droid AI.
+Two Ataris, each with a FujiNet, play one game of Ballblazer. Both boot the
+same patched disk. The top view is the host's rotofoil, the bottom view the
+joining player's; each machine shows both, exactly like the stock game.
 
-## What Ballblazer is
+## Deterministic lockstep
 
-Ballblazer (Lucasfilm Games, 1985) is a one-on-one sport played on a flat
-checkerboard "grid plain." Each player pilots a *rotofoil* and tries to fire the
-floating *plasmorb* through the opponent's goal. The screen is split
-horizontally: each player sees a first-person 3-D view of the grid (the famous
-fractal-smooth "Rotoscape"). The rotofoil auto-rotates ("snaps") to face the
-ball or the goal.
+Nothing about the *game state* ever crosses the wire. Both machines run the
+identical simulation, tick for tick, and exchange only controller inputs:
 
-Two game modes exist in the original:
+- Ballblazer's whole simulation — both craft, the plasmorb, goals, clock,
+  droids, music — is one routine, the **tick** (`$4CBE`), which the game calls
+  once per frame from its vertical-blank interrupt. The main loop only redraws
+  the two views.
+- The patch wedges the tick's entry (`hook` in `src/netplay/resident.s`). A
+  tick runs **only when both players' inputs for that tick are known**. If the
+  opponent's input has not arrived, the frame is skipped: the game waits, it
+  never guesses and never diverges.
+- A local input sampled while tick *T* runs is scheduled for tick *T + delay*
+  and sent to the peer in the meantime. `delay` (3–9 frames, chosen by the
+  host, default 5) hides the network round trip; it is the only latency the
+  player feels.
+- Everything else the tick reads from hardware is virtualised so that both
+  machines see the same values:
+  - joystick, trigger, console keys and keyboard reads are redirected to
+    bytes filled in from the two input streams;
+  - every read of POKEY's `RANDOM` becomes a call to a seeded generator that
+    both sides step identically (the host picks the seed at connect time);
+  - each craft's facing, which the stock game latches from a display
+    interrupt whenever that view happens to have been redrawn, is latched once
+    per tick instead.
 
-- **One player vs. droid** — the human drives one rotofoil; a computer *droid*
-  (skill 1–9) drives the other.
-- **Two players** — two humans on the **same machine**, one per screen half. No
-  networking existed in 1985.
+Because lockstep starts with the very first tick, everything is mirrored:
+title screen, option selection (HUMAN/DROID, game length), the match, pause.
+START, SELECT, OPTION, SPACE, ESC and RETURN travel in the input stream, so
+either player can press them.
 
-The key structural fact for us: **the game already knows how to drive two
-rotofoils and render both views.** Single-player mode simply feeds one
-rotofoil's controls from the droid AI instead of a second joystick.
+Why not synchronise state (the earlier design in this repo)? It needs every
+gameplay variable understood and split by authority, and it still disagrees
+whenever two craft or a craft and the ball interact. Lockstep needs only the
+tick's inputs to be equal — and that can be *proven*: `tests/np_soak.py`
+freezes two linked emulators on the same tick and compares all 64 KB.
 
-## The core idea
+## What is changed in the game
 
-> Run the game as if it were the native two-player mode, but source the second
-> rotofoil's state from the **network** instead of a local joystick or the
-> droid, and transmit the local rotofoil's state out.
+Nothing on disk is altered. The disk builder appends two segments of original
+code to the game's load stream; at boot the lobby patches the copy in RAM:
 
-Concretely, each machine:
+| where | what | why |
+|---|---|---|
+| `$4CBE` tick entry | `JMP hook` | the lockstep gate |
+| `$4C8A` main loop | `JMP idle` (`CLI`, back to the loop) | the stock game runs with IRQs masked; the serial port needs them |
+| controller/console/keyboard reads | operands → `v_*` bytes | inputs come from the streams |
+| 17 × `LDA RANDOM`, 3 × `CMP`, 1 × `LDY` | `JSR prng` / operands → PRNG state | shared randomness |
+| two display-interrupt facing latches | `NOP`s | facing is latched per tick |
+| `$797B` sound commit | `JMP mix` | POKEY voices 3+4 are the serial clock |
+| IRQEN / SKCTL / AUDCTL writes | operands → a dummy byte | hands off the serial port |
+| end of each display kernel | `JSR` → `dli_a` / `dli_b` | re-enable IRQs for a long routine |
+| `$A439` | `JSR $4C41` → `JSR $4CBE` | repair a damaged byte in the image (see findings) |
 
-1. Reads its **local** joystick and runs the *unmodified* rotofoil physics for
-   its own craft (zero input latency — feels native).
-2. Sends that craft's authoritative state to the peer (`netgame.s`,
-   ~20 packets/sec).
-3. Receives the peer's craft state and writes it into the variables the game
-   uses for "the other rotofoil," extrapolating between packets so motion stays
-   smooth at 60 Hz.
-4. Agrees on **one** authority for the shared plasmorb (the *host*), so the ball
-   never forks into two contradictory truths.
+Choosing "local game" in the lobby (just RETURN) applies none of this.
 
-This is the standard client/server-with-local-prediction model used by real
-action games, adapted to a two-machine, two-object world. See
-[`04-netcode.md`](04-netcode.md) for the full rationale (why not lockstep, how
-dead reckoning works, how the ball authority resolves).
+## Memory
 
-## The three integration seams in the ROM
+| region | use |
+|---|---|
+| `$BC00–$BFFF` | resident code. Held the original tape loader; dead once the game runs. 922 of 1024 bytes used. |
+| `$0224–$02F8` | second resident chunk, copied there at launch. OS variables, unused after the game takes over (it never calls the OS). |
+| `$0180–$01B9` | link state. Bottom of the stack page; the game's stack stays above `$01D0`. |
+| `$0100–$017F` | the two input rings (64 ticks each). |
+| `$2000–…` | the lobby. Free at load time; reclaimed by the game afterwards. |
 
-Reverse engineering (see [`03-disassembly.md`](03-disassembly.md)) has to locate
-three things. Everything else in `netgame.s`/`ncio.s` is already written and
-tested against a defined `NETSTATE` struct; integration is *wiring*, not new
-netcode.
+The game clears zero page and `$0300–$3FFF` at start and uses most of it
+(`$0300–$07FF` and `$0B00–$0FFF` are sprite memory), which is why none of the
+obvious "free" pages are usable.
 
-### Seam A — the opponent input/AI hook (the important one)
+## Limits
 
-Somewhere each frame the game decides the second rotofoil's intended motion.
-In two-player mode that comes from joystick 1; in one-player mode from the
-droid AI. **Find the branch that selects the droid**, and replace the droid's
-per-frame decision with "apply the remote rotofoil state we received."
-
-How to find it: set a breakpoint / trace reads of the joystick-1 shadow
-(`STICK1`, `$0279`) and of `RANDOM` (`$D20A`) — a skill-scaled AI almost
-certainly consults the hardware PRNG. The code path that consumes those and
-writes the second craft's velocity/heading is Seam A.
-
-### Seam B — the shared state variables
-
-Identify the memory holding each rotofoil's **position (X,Y), velocity, and
-heading**, and the **plasmorb's position + possession**. These map onto the
-`loc_*` / `rem_*` / `ball_*` fields in `netgame.s`. Finding them: watch which
-zero-page/RAM locations change as you move on the grid in an emulator's memory
-view; positions change smoothly, heading tracks the snap-to-target.
-
-### Seam C — the mode select + match lifecycle
-
-Find the one/two-player mode flag and the "goal scored" / "match over" routines.
-Add a third mode ("network match") that: initialises the link (`ng_init`, open
-`N:`), forces the two-rotofoil rendering path, and routes goal/score events
-through the packet's event field so both machines agree on the score.
-
-## Per-frame control flow after integration
-
-```
-        ┌─────────────────────────── game VBLANK / main loop ──────────────────────────┐
-        │                                                                               │
-  read local joystick ──> unmodified rotofoil physics ──> loc_* (our craft: X,Y,V,hdg)  │
-        │                                                                               │
-        │   ng_tick():   drain inbound (non-blocking) ─> rem_* / ball_*                 │
-        │                dead-reckon rem_* by last velocity                             │
-        │                every 3rd frame: send loc_* (+ball_* if we are host)           │
-        │                                                                               │
-  Seam A: write rem_* into "opponent rotofoil" vars  (was: droid AI output)             │
-  Seam B: host writes ball physics -> ball_*; client renders ball_* from packet         │
-        │                                                                               │
-  render both split-screen views exactly as the stock game does ─────────────────────────┘
-```
-
-Because `ng_tick` never blocks (it only ever GETs bytes CIO already has, per
-[`02-fujinet-n-device.md`](02-fujinet-n-device.md)), dropping it into the frame
-loop costs a bounded, small slice of CPU and never stalls a frame.
-
-## What stays untouched
-
-The renderer, the fractal-grid drawing, sound, and — crucially — **your own**
-rotofoil's physics all run stock. We only (a) redirect the *opponent's* input
-source and (b) pick a single authority for the ball. That keeps the port small
-and the game feeling like Ballblazer.
+- One supported image (checked by checksum at boot). See `docs/04-findings.md`.
+- If the link dies, both games freeze waiting; there is no reconnect. Power
+  cycle (System Reset is not safe once the game runs — the OS's page-2
+  variables have been reused).
+- No desync detector in the shipped code. The evidence that none occurs is the
+  emulator soak; if one ever did, the two screens would simply drift apart.

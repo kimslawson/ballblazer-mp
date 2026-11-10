@@ -82,7 +82,7 @@ T_O       = 8                   ; ~130 ms; a round trip is ~40 ms
 
 ; ---- configuration, filled in by the lobby --------------------------------
 cfg_role:   .byte 0             ; $00 = host (player 1), $80 = client (player 2)
-cfg_delay:  .byte 4             ; input delay in ticks
+cfg_delay:  .byte 5             ; input delay in ticks
 cfg_baud:   .byte 109           ; AUDF3 for 2400 baud (109 NTSC / 106 PAL)
 rnd0:       .byte $C3           ; shared random seed
 rnd1:       .byte $5A

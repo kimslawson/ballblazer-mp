@@ -34,8 +34,8 @@
 TEST = 0
 .endif
 .ifndef NOFUJI
-NOFUJI = 0                      ; 1 = serial-driver test build: no FujiNet
-.endif                          ;     commands, role taken from cfg_role
+NOFUJI = 0                      ; 1 = serial-driver test build: the two FujiNet
+.endif                          ;     commands are skipped (as if they succeeded)
 
 VERSION   = 1                   ; protocol version (HELLO)
 PORT      = 6502                ; UDP port, both ends
@@ -75,7 +75,6 @@ start:
         lda #106
         sta cfg_baud
 :
-.if NOFUJI = 0
         ; ---- who are we? ask FujiNet for the adapter configuration
         lda #$E8                ; GET ADAPTER CONFIG -> 140 bytes
         ldy #$40                ; read
@@ -122,13 +121,26 @@ start:
         jsr print
         jsr input2
         lda line2
-        ldx #$00
-        cmp #'H'
-        beq :+
+        and #$5F                ; either case
         ldx #$80
         cmp #'J'
+        beq @role
+        cmp #'H'
         bne @askrole
-:       stx cfg_role
+        ; ---- the host picks the input delay (it travels in WELCOME)
+        lda #<m_askdelay
+        ldx #>m_askdelay
+        jsr print
+        jsr input2
+        lda line2
+        cmp #'3'
+        bcc :+
+        cmp #'9'+1
+        bcs :+
+        and #$0F
+        sta cfg_delay
+:       ldx #$00
+@role:  stx cfg_role
 
         ; ---- NetStream towards the opponent: host string, NUL, flags, AUDF3
         ldx #63
@@ -167,7 +179,6 @@ start:
         jsr pause
         jmp G_START
 :
-.endif
         lda #<m_wait
         ldx #>m_wait
         jsr print
@@ -463,6 +474,11 @@ imgsum: lda #$00
 ; fuji: SIO command to the FujiNet control device.
 ;   A = command, Y = $40 read / $80 write, X = byte count; buffer = fbuf
 ;   returns with N set on error
+.if NOFUJI
+fuji:
+fuji1:  lda #1                  ; test build: pretend FujiNet said yes
+        rts
+.else
 fuji:   pha
         lda #0
         sta DAUX1
@@ -486,6 +502,7 @@ fuji1:  sta DCOMND
         jsr SIOV
         tya
         rts
+.endif
 
 ; print: EOL-terminated string at X:A
 print:  sta ICBAL
@@ -571,6 +588,9 @@ pause:  lda #<m_pause
 :       lda CONSOL
         and #1
         bne :-
+:       lda CONSOL              ; ... and let go, or the game would take it
+        and #1                  ;     as "start a match"
+        beq :-
         rts
 
 welcomed:   .byte 0
@@ -579,10 +599,11 @@ m_banner:   .byte "BALLBLAZER NETPLAY", EOL
 m_bad:      .byte "THIS IS NOT THE GAME IMAGE THE NETPLAY", EOL
             .byte "PATCH WAS MADE FOR. LOCAL GAME ONLY.", EOL
 m_nofuji:   .byte "NO FUJINET ANSWERED. LOCAL GAME ONLY.", EOL
-m_myip:     .byte "THIS ATARI IS AT ", 0
+m_myip:     .byte "THIS ATARI'S ADDRESS:", EOL
 m_askip:    .byte "OPPONENT'S ADDRESS", EOL
             .byte "(JUST RETURN = LOCAL GAME)", EOL
-m_askrole:  .byte "H = HOST, PLAYER 1   J = JOIN, PLAYER 2", EOL
+m_askrole:  .byte "H = HOST, TOP    J = JOIN, BOTTOM", EOL
+m_askdelay: .byte "INPUT DELAY, 3-9 FRAMES (RETURN = 5)", EOL
 m_nostream: .byte "FUJINET REFUSED NETSTREAM MODE.", EOL
 m_wait:     .byte "WAITING FOR OPPONENT. START = GIVE UP", EOL
 m_differ:   .byte "OPPONENT HAS A DIFFERENT VERSION.", EOL

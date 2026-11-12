@@ -28,8 +28,6 @@ It touches only your own local disk image and writes under build/ (git-ignored).
         r.shot("build/shots/a.png")
         ram = r.dump()                    # bytes $0000-$FFFF (enters monitor)
 """
-import ctypes
-import fcntl
 import hashlib
 import os
 import pty
@@ -37,11 +35,9 @@ import re
 import select
 import shutil
 import signal
-import struct
 import subprocess
 import sys
 import tempfile
-import termios
 import time
 
 PROMPT = b"> "
@@ -53,6 +49,9 @@ PROMPT = b"> "
 # 16-frame slices and blocks on the pipe in between.
 FRAME = 1024
 BLOCK = 16
+FRAME_MARK = b"adler32 does not match"   # logged once per frame (not the first)
+QUIET = 0.06             # s of silence after the last frame's log line: longer
+                         #   than one frame even when the emulator is not in turbo
 DIRS = {"U": 1, "D": 2, "L": 4, "R": 8}
 
 
@@ -79,6 +78,9 @@ class Rig:
         self.fed = 0
         self.buf = b""
         self._fd = None
+        self._tail = b""
+        self.lines = 0          # frames the emulator has reported running
+        self.early = 0          # times the monitor opened without the extra slice
         # held input state (applied to every frame fed until changed)
         self.joy = ["", "", "", ""]
         self.trig = [False] * 4
@@ -96,14 +98,26 @@ class Rig:
         env = dict(os.environ, SDL_AUDIODRIVER="dummy")
         self.xvfb = None
         if self.video:
-            self.xvfb = subprocess.Popen(
-                ["Xvfb", self.display, "-screen", "0", "800x600x24",
-                 "-nolisten", "tcp"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            for _ in range(100):
-                if os.path.exists("/tmp/.X11-unix/X" + self.display[1:]):
-                    break
+            # find a display number Xvfb can actually take (a crashed earlier
+            # run may have left a lock behind)
+            base = int(self.display[1:])
+            for num in [base] + list(range(100, 140)):
+                x = subprocess.Popen(
+                    ["Xvfb", ":%d" % num, "-screen", "0", "800x600x24",
+                     "-nolisten", "tcp"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                for _ in range(40):
+                    if x.poll() is not None or \
+                            os.path.exists("/tmp/.X11-unix/X%d" % num):
+                        break
+                    time.sleep(0.05)
                 time.sleep(0.05)
+                if x.poll() is None:
+                    self.xvfb, self.display = x, ":%d" % num
+                    break
+            if self.xvfb is None:
+                self.video = False             # carry on without pictures
+        if self.video:
             env.update(DISPLAY=self.display, SDL_VIDEODRIVER="x11")
         else:
             env.update(SDL_VIDEODRIVER="dummy")
@@ -128,6 +142,8 @@ class Rig:
         # The emulator opens the FIFO for reading during init; this open
         # unblocks it. It then expects the two header lines.
         self.w = os.open(self.fifo, os.O_WRONLY)
+        os.set_blocking(self.w, False)     # pipes are small on macOS: never
+                                           # stall in write() with the pty unread
         self.header = b"Atari800 event recording, version: 1\n55704\n"
         self.written = 0
         self._w(self.header)
@@ -160,13 +176,21 @@ class Rig:
         os.write(self.master, (line + "\n").encode())
 
     def _read_some(self, timeout):
+        """Read whatever the emulator printed. Every executed frame makes it
+        log one line (our playback records carry a dummy screen checksum);
+        counting those lines tells us exactly how far it has got."""
         r, _, _ = select.select([self.master], [], [], timeout)
-        if r:
-            try:
-                return os.read(self.master, 65536)
-            except OSError:
-                return b""
-        return b""
+        if not r:
+            return b""
+        try:
+            data = os.read(self.master, 65536)
+        except OSError:
+            return b""
+        blob = self._tail + data
+        self.lines += blob.count(FRAME_MARK)
+        self._tail = blob[-(len(FRAME_MARK) - 1):]
+        self.buf = (self.buf + data)[-2000:]
+        return data
 
     def _wait_prompt(self, timeout=10):
         end = time.time() + timeout
@@ -205,11 +229,16 @@ class Rig:
         while data:
             r, w, _ = select.select([self.master], [self.w], [], 1)
             if r:
-                self.buf = (self.buf + os.read(self.master, 65536))[-2000:]
+                self._read_some(0)
+            n = 0
             if w:
-                n = os.write(self.w, data[:4096])
+                try:
+                    n = os.write(self.w, data[:4096])
+                except BlockingIOError:
+                    n = 0
                 self.written += n
                 data = data[n:]
+            if n:
                 idle = 0
             elif not r:
                 idle += 1
@@ -317,69 +346,73 @@ class Rig:
         f = open("/proc/%d/syscall" % self.p.pid).read().split()
         return len(f) > 1 and f[0] == "0" and int(f[1], 16) == self._fd
 
-    def _idle_darwin(self):
-        """macOS: no thread of the process is runnable (libproc). The only
-        things the emulator ever waits for are the input pipe and its
-        terminal, and the terminal is kept drained - so three such samples in
-        a row mean it is starved for input."""
-        if self._fd is None:
-            self._fd = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
-            self._pti = ctypes.create_string_buffer(96)   # struct proc_taskinfo
-        n = self._fd.proc_pidinfo(self.p.pid, 4, ctypes.c_uint64(0),
-                                  self._pti, 96)          # PROC_PIDTASKINFO
-        if n != 96:
-            raise OSError("proc_pidinfo failed")
-        return struct.unpack_from("i", self._pti, 88)[0] == 0   # pti_numrunning
-
-    def _idle_generic(self):
-        """Fallback: the pipe is empty (the caller then waits a while)."""
-        n = struct.unpack("i", fcntl.ioctl(self.w, termios.FIONREAD,
-                                           b"\0\0\0\0"))[0]
-        return n == 0
-
     def idle_method(self):
-        m = os.environ.get("RIG_IDLE")
-        if not m:
-            m = {"linux": "linux", "darwin": "darwin"}.get(sys.platform,
-                                                             "generic")
-        return m
+        return os.environ.get("RIG_IDLE") or (
+            "linux" if sys.platform == "linux" else "count")
 
     def _wait_blocked(self, timeout=180):
         """Wait until the emulator has executed every frame it was given and
-        is asleep waiting for more."""
+        is asleep waiting for more.
+
+        linux: exact - /proc shows it blocked in read() on our pipe.
+        count: portable - its log shows every fed frame started, then it has
+               been silent long enough to have finished the last one."""
         method = self.idle_method()
-        probe = getattr(self, "_idle_" + method)
-        need = {"linux": 1, "darwin": 3, "generic": 25}[method]
-        streak = 0
         end = time.time() + timeout
-        while time.time() < end:
-            got = self._read_some(0.0005 if method == "linux" else 0.002)
-            if got:                            # keep the pty drained
-                self.buf = (self.buf + got)[-2000:]
-                streak = 0
-                continue
-            if self.p.poll() is not None:
-                raise RuntimeError("emulator exited (%s); it said: %r"
-                                   % (self.p.returncode, self.buf[-400:]))
-            try:
-                streak = streak + 1 if probe() else 0
-            except OSError:
-                streak = 0
-            if streak >= need:
-                return
-        raise TimeoutError("emulator never went idle")
+        if method == "linux":
+            while time.time() < end:
+                if self._read_some(0.0005):        # keep the pty drained
+                    continue
+                if self.p.poll() is not None:
+                    break
+                try:
+                    if self._idle_linux():
+                        return
+                except OSError:
+                    pass
+        else:
+            quiet = None
+            while time.time() < end:
+                if self._read_some(0.005):
+                    quiet = None
+                    continue
+                if self.p.poll() is not None:
+                    break
+                if self.lines >= self.fed - 1:     # first frame logs nothing
+                    now = time.time()
+                    if quiet is None:
+                        quiet = now
+                    elif now - quiet >= QUIET:
+                        return
+        if self.p.poll() is not None:
+            raise RuntimeError("emulator exited (%s); it said: %r"
+                               % (self.p.returncode, self.buf[-400:]))
+        raise TimeoutError("emulator never went idle (fed %d frames, it "
+                           "reported %d); it said: %r"
+                           % (self.fed, self.lines, self.buf[-300:]))
 
     def brk(self):
         """Enter the monitor at a frame boundary. Costs one 16-frame slice.
 
-        The emulator is only ever signalled while it is asleep on the input
-        pipe; signalling it mid-frame or inside the monitor proved unreliable
-        with atari800 5.0."""
+        The emulator is signalled while it is asleep on the input pipe; it
+        then needs one more frame to notice, which the extra slice supplies."""
         if self.in_monitor:
             return
         self.sync()
         self.p.send_signal(signal.SIGINT)
-        time.sleep(0.002)
+        if self.idle_method() != "linux":
+            # Without /proc we cannot be certain it was asleep. If it was
+            # still finishing a frame, the monitor opens by itself - and must
+            # not be fed (nobody would read the pipe).
+            try:
+                self._wait_prompt(0.05)
+                self.in_monitor = True
+                self.early += 1
+                return
+            except TimeoutError:
+                pass
+        else:
+            time.sleep(0.002)
         self.feed(BLOCK)
         self._wait_prompt(30)
         self.in_monitor = True
@@ -504,6 +537,7 @@ def selfcheck(disk):
         print("note: untested with atari800 older than 5.0")
     sums = []
     for run in range(2):
+        t0 = time.time()
         with Rig(disk) as r:
             r.step(704)
             for i in range(150):
@@ -511,8 +545,14 @@ def selfcheck(disk):
                        start=(i == 3))
                 r.poke(0x0600, i & 0xFF)       # forces a monitor round trip
             ram = r.dump(0x0000, 0xBFFF)
+            if r.lines != r.fed - 16:      # the last slice is still queued
+                print("note: fed %d frames, emulator reported %d"
+                      % (r.fed, r.lines + 1))
             sums.append(hashlib.md5(ram).hexdigest())
-            print("run %d: %d frames, memory md5 %s" % (run + 1, r.fed, sums[-1]))
+            print("run %d: %d frames in %.1fs, memory md5 %s%s"
+                  % (run + 1, r.fed, time.time() - t0, sums[-1],
+                     "  (monitor opened early %d times)" % r.early
+                     if r.early else ""))
     if sums[0] != sums[1]:
         print("FAIL: two identical runs ended in different memory - the rig "
               "is not frame-exact here")

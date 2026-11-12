@@ -162,7 +162,7 @@ variables:
 |---|---|
 | `ATARI800=/path/to/atari800` | use a specific emulator binary |
 | `RIG_VIDEO=0` | no screenshots even if Xvfb is installed |
-| `RIG_IDLE=generic` | fall back to a timing-based idle test if the native one misbehaves |
+| `RIG_IDLE=count` | on Linux, use the portable idle test (the one macOS always uses) instead of `/proc` |
 
 Differences between the two systems:
 
@@ -170,9 +170,11 @@ Differences between the two systems:
   emulator runs with SDL's dummy video driver; the tests' verdicts do not
   depend on pictures.
 - To know when the emulator has run everything it was fed, the rig asks
-  `/proc` on Linux and `libproc` on macOS. The Linux path and the generic
-  fallback are exercised here; **the macOS path has not been run by the
-  author** — `selfcheck` is the test of it.
+  `/proc` on Linux (exact). Elsewhere it counts the line the emulator logs
+  for every frame and then waits for 60 ms of silence — slower (the soak
+  takes about twice as long) but it needs nothing from the OS. That method
+  passes every test on Linux (`RIG_IDLE=count`); on macOS itself it has only
+  been run by whoever is reading this.
 - The rig was developed against atari800 5.0.0 (what Debian/Ubuntu ship).
   Homebrew has a newer release. The input-playback file format the rig
   writes is the same in every release up to 7.2.1; it changed on the

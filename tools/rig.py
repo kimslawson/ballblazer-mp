@@ -65,8 +65,10 @@ def stick(s):
 
 class Rig:
     def __init__(self, disk, display=None, video=None, extra=(), ntsc=True,
-                 machine="-xl"):
+                 machine="-xl", record=None):
         self.disk = disk
+        self.record = record    # path: keep a copy of everything fed, for replay()
+        self.rec = None
         self.display = display or ":%d" % (70 + os.getpid() % 25)
         if video is None:                  # screenshots only where possible
             video = have_video()
@@ -141,6 +143,8 @@ class Rig:
         os.close(slave)
         # The emulator opens the FIFO for reading during init; this open
         # unblocks it. It then expects the two header lines.
+        if self.record:
+            self.rec = open(self.record, "wb")
         self.w = os.open(self.fifo, os.O_WRONLY)
         os.set_blocking(self.w, False)     # pipes are small on macOS: never
                                            # stall in write() with the pty unread
@@ -164,6 +168,8 @@ class Rig:
             self.p.kill()
         if self.xvfb:
             self.xvfb.terminate()
+        if self.rec:
+            self.rec.close()
         for fd in (self.master, self.w):
             try:
                 os.close(fd)
@@ -236,6 +242,8 @@ class Rig:
                     n = os.write(self.w, data[:4096])
                 except BlockingIOError:
                     n = 0
+                if n and self.rec:
+                    self.rec.write(data[:n])
                 self.written += n
                 data = data[n:]
             if n:
@@ -490,6 +498,40 @@ class Rig:
         im.save(path)
         os.unlink(raw)
         return path
+
+
+def replay(disk, record, extra=(), ntsc=True, machine="-xl", scale=3,
+           sound=True, wait=True):
+    """Play a recorded session back in an ordinary emulator window, at real
+    speed and with sound: the same disk, the same input stream (the file a
+    Rig(record=...) wrote), no monitor, no turbo. The emulator is
+    deterministic, so what you see is exactly what the test ran. It exits by
+    itself when the recording ends."""
+    exe = os.environ.get("ATARI800") or shutil.which("atari800")
+    if not exe:
+        raise RuntimeError("atari800 not found (set ATARI800=/path/to/it)")
+    tmp = tempfile.mkdtemp(prefix="rigplay")
+    args = [exe, "-config", os.path.join(tmp, "atari800.cfg"),
+            "-nobasic", machine, "-xl-rev", "altirra",
+            "-ntsc" if ntsc else "-pal",
+            "-windowed", "-win-width", str(336 * scale),
+            "-win-height", str(240 * scale),
+            "-playback", record]
+    if not sound:
+        args.append("-nosound")
+    args += list(extra)
+    if disk:
+        args.append(disk)
+    p = subprocess.Popen(args, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not wait:
+        return p, tmp
+    try:
+        p.wait()
+    except KeyboardInterrupt:
+        p.terminate()
+    shutil.rmtree(tmp, ignore_errors=True)
+    return None
 
 
 def have_video():

@@ -16,6 +16,10 @@ FujiNet SIO commands are stubbed out (NOFUJI build).
 
     np_serial.py client     the tape plays the host   (default)
     np_serial.py host       the tape plays the client
+    np_serial.py client --watch
+                            ... then replay the session in a normal emulator
+                            window at real speed, with sound (about 2 minutes:
+                            disk boot, lobby, handshake, a minute of play)
 
 Pass = every packet accepted, no damaged bytes, and the game is in a match.
 Needs rom/ballblazer.atr and the stock atari800.
@@ -29,7 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import npproto as P  # noqa: E402
-from rig import Rig  # noqa: E402
+from rig import Rig, replay  # noqa: E402
 from nplink import labels  # noqa: E402
 
 BAUD = 2400
@@ -84,7 +88,9 @@ def make_tape(path, tape_is_host):
 
 
 def main():
-    role = sys.argv[1] if len(sys.argv) > 1 else "client"
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    watch = "--watch" in sys.argv
+    role = args[0] if args else "client"
     assert role in ("host", "client")
 
     def sh(*a):
@@ -101,8 +107,10 @@ def main():
     cas = os.path.join(ROOT, "build/np/serial-%s.cas" % role)
     total = make_tape(cas, tape_is_host=(role == "client"))
 
-    with Rig(os.path.join(ROOT, "build/np/serial.atr"),
-             extra=["-nopatch", "-tape", cas, "-tape-readonly"]) as r:
+    disk = os.path.join(ROOT, "build/np/serial.atr")
+    extra = ["-nopatch", "-tape", cas, "-tape-readonly"]
+    rec = os.path.join(ROOT, "build/np/serial-%s.playback" % role)
+    with Rig(disk, extra=extra, record=rec if watch else None) as r:
         r.step(1700)                       # boot at real disk speed
         r.type("10.0.0.2\n")               # opponent's address
         r.step(30)
@@ -116,9 +124,12 @@ def main():
         # the START key belongs to the lobby until the game runs
         st = {}
         want = (DELAY + total) & 0xFF
+        moves = ["U", "UL", "U", "UR", "U", "L", "U", "R"]
         for n in range(60):
             if role == "host" and n == 8:
                 r.step(8, start=True)      # the host starts the match
+            if n >= 10:                    # this Atari's player flies about
+                r.set(joy0=moves[n % len(moves)], trig0=(n % 5 == 0))
             r.step(160)
             m = r.dump(0x0180, 0x01BF)
             st = {k: m[L[k] - 0x180] for k in
@@ -138,6 +149,10 @@ def main():
           % (role, total, PACKETS, st["r_wr"], want, st["tick"],
              st["err_cnt"], cfg[1]))
     print("PASS" if ok else "FAIL")
+    if watch and ok:
+        print("Replaying in a window (real speed; it closes by itself). The "
+              "first half minute is the disk loading.")
+        replay(disk, rec, extra=extra)
     sys.exit(0 if ok else 1)
 
 

@@ -6,6 +6,7 @@
 #   make nptest      the emulator tests (need rom/ballblazer.atr + atari800):
 #                      nplock    two linked emulators, lockstep soak
 #                      npserial  real serial driver + lobby, both roles
+#   make watch       run npserial, then replay it in a window you can watch
 #   make disasm / rebuild / dump / dump-run / findings   reverse-engineering aids
 #   make clean
 #
@@ -23,7 +24,7 @@ DISK  ?= rom/ballblazer.atr
 NP_SRC := src/netplay/resident.s src/netplay/lobby.s \
           src/netplay/hw.inc src/netplay/game.inc cfg/netplay.cfg
 
-.PHONY: all test netplay disk nptest nplock npserial selftest disasm rebuild \
+.PHONY: all test netplay disk nptest nplock npserial watch selftest disasm rebuild \
         dump dump-run findings clean
 
 all: test
@@ -62,6 +63,12 @@ nplock:
 npserial:
 	$(PY) tests/np_serial.py client
 	$(PY) tests/np_serial.py host
+
+# run the serial test, then watch it: the same session replayed in a normal
+# emulator window at real speed, with sound (ROLE=host for the other side)
+ROLE ?= client
+watch:
+	$(PY) tests/np_serial.py $(ROLE) --watch
 
 # ---- reverse-engineering aids (need your own image) ------------------------
 disasm:

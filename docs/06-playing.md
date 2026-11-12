@@ -153,6 +153,27 @@ python3 tools/rig.py selfcheck
 make nptest
 ```
 
+### Watching a run
+
+```sh
+make watch              # or: make watch ROLE=host
+```
+
+runs the serial test as usual and then **replays it in an ordinary emulator
+window, at real speed and with sound**: the disk loading (about half a
+minute), the lobby being typed into, the handshake, and a minute of play
+against the scripted remote machine. The rig keeps a copy of every frame of
+input it fed; the emulator is deterministic, so playing that file back shows
+exactly the session the test just judged. The small `C` that flickers in the
+corner is the emulator's cassette indicator - that is the "remote Atari"
+talking. The window closes by itself at the end.
+
+The tests themselves cannot run in a visible window: the emulator closes its
+window whenever the rig stops it to look at memory, which happens several
+times a second. The two-machine soak (`nplock`) has no replay because the rig
+pokes the link's mailboxes from outside; what it would show is what the
+replay above shows anyway - in lockstep both machines display the same game.
+
 `selfcheck` prints the emulator version and how the rig detects that the
 emulator is idle, then runs the same scripted session twice and compares
 memory; run it first on a new machine. Three knobs, all environment

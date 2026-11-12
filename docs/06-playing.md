@@ -23,6 +23,27 @@ make disk          # -> build/ballblazer-net.atr  (and .xex)
 The output contains your game plus about 3 KB of this project's code. Treat
 it like the original: it stays on your machines.
 
+### On macOS
+
+```sh
+brew install cc65                 # ca65 / ld65; python3 and make come with Xcode tools
+md5 rom/ballblazer.atr            # must print a37afb54b6edbd03c348efa0b714d37c
+make test && make disk
+md5 build/ballblazer-net.atr      # 077bfb16df15d7fe87d7691a99847872 at commit 103b0d4+
+```
+
+The input image is the file
+`Ballblazer_1985_Lucasfilm_Games_Regulation_Certified_k_file.atr` (35,344
+bytes) from the Internet Archive item
+`a8b_Ballblazer_1985_Lucasfilm_Games_Regulation_Certified_k_file` — not the
+"[a]" item next to it. `mkdisk.py` refuses anything else.
+
+If your output md5 differs but `make test` passes, compare
+`build/np/np0.resident` and `build/np/np0.lobby` first: a different cc65
+release could in principle assemble a byte differently (this was built with
+cc65 2.18 / 2.19). `make test` and `make disk` are all a Mac needs; the
+emulator tests (`make nptest`) are Linux-only — the rig uses Xvfb and `/proc`.
+
 ## Play
 
 1. Put `ballblazer-net.atr` on both FujiNets as D1: and boot both Ataris.

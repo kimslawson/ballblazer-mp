@@ -17,7 +17,7 @@ if [ -f build/disk/boot.s ]; then
     ca65 -t none build/disk/boot.s -o build/disk/boot.o
     ld65 -C disasm/disk-boot.cfg -o build/disk/boot.rebuilt build/disk/boot.o
     if cmp -s build/disk/boot.bin build/disk/boot.rebuilt; then
-        echo "IDENTICAL: boot loader matches ($(stat -c%s build/disk/boot.bin) bytes)."
+        echo "IDENTICAL: boot loader matches ($(wc -c < build/disk/boot.bin | tr -d ' ') bytes)."
         echo "The loader disassembly is faithful. Continue mapping the loaded"
         echo "segments (docs/03-disassembly.md, 'Disk version')."
     else

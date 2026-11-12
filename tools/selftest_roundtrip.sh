@@ -24,7 +24,7 @@ ld65 -C disasm/cart16k.cfg -o build/fakecart.rebuilt build/fakecart.o
 
 echo "[4/4] compare"
 if cmp -s build/fakecart.rom build/fakecart.rebuilt; then
-    echo "PASS: rebuilt image is byte-identical to the original ($(stat -c%s build/fakecart.rom) bytes)"
+    echo "PASS: rebuilt image is byte-identical to the original ($(wc -c < build/fakecart.rom | tr -d ' ') bytes)"
     exit 0
 else
     echo "FAIL: images differ:"

@@ -58,7 +58,7 @@ if [ "$cartmagic" = "43415254" ]; then
 else
     cp "$ROM" "$RAW"
 fi
-size=$(stat -c%s "$RAW")
+size=$(wc -c < "$RAW" | tr -d ' ')
 echo "=== CART image: $size bytes ==="
 case "$size" in
     16384) echo "-> 16K cartridge, \$8000-\$BFFF (matches ballblazer.info).";;

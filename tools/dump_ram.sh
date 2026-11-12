@@ -52,4 +52,4 @@ else
     echo "unknown mode '$mode'"; exit 1
 fi
 
-[ -s "$out" ] && echo "dumped $(stat -c%s "$out") bytes -> $out" || { echo "no dump produced"; exit 1; }
+[ -s "$out" ] && echo "dumped $(wc -c < "$out" | tr -d ' ') bytes -> $out" || { echo "no dump produced"; exit 1; }

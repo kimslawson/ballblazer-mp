@@ -23,8 +23,8 @@ for flags in "-D TEST=0" "-D TEST=1" "-D TEST=0 -D NOFUJI=1"; do
        ca65 -g -t none $flags -I src/netplay src/netplay/lobby.s    -o build/np/lob$n.o &&
        ld65 -C cfg/netplay.cfg -Ln build/np/np$n.lbl -m build/np/np$n.map \
             -o build/np/np$n build/np/res$n.o build/np/lob$n.o; then
-        echo "  np$n: resident $(stat -c%s build/np/np$n.resident)/1024 bytes," \
-             "lobby $(stat -c%s build/np/np$n.lobby) bytes"
+        echo "  np$n: resident $(wc -c < build/np/np$n.resident | tr -d ' ')/1024 bytes," \
+             "lobby $(wc -c < build/np/np$n.lobby | tr -d ' ') bytes"
     else
         fail=1
     fi

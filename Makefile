@@ -37,8 +37,8 @@ $(NP)/np0.resident: $(NP_SRC)
 	$(CA65) -g -t none -D TEST=0 -I src/netplay src/netplay/lobby.s    -o $(NP)/lob0.o
 	$(LD65) -C cfg/netplay.cfg -Ln $(NP)/np0.lbl -m $(NP)/np0.map -o $(NP)/np0 \
 	        $(NP)/res0.o $(NP)/lob0.o
-	@echo "resident: $$(stat -c%s $(NP)/np0.resident) of 1024 bytes;" \
-	      "lobby: $$(stat -c%s $(NP)/np0.lobby) bytes"
+	@echo "resident: $$(wc -c < $(NP)/np0.resident | tr -d ' ') of 1024 bytes;" \
+	      "lobby: $$(wc -c < $(NP)/np0.lobby | tr -d ' ') bytes"
 
 # ---- the playable disk (your own image stays on your machine) --------------
 disk: build/ballblazer-net.atr

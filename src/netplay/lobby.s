@@ -86,7 +86,15 @@ start:
         jsr print
         jsr pause
         jmp G_START
-:       lda #<m_myip
+:       lda fbuf+97             ; localIP[0]. FujiNet-PC (emulators, phone
+        beq @noip               ;   apps) does not know its host's address
+        cmp #127                ;   and answers 127.0.0.1 - showing that
+        bne @myip               ;   would only mislead
+@noip:  lda #<m_noip
+        ldx #>m_noip
+        jsr print
+        jmp @askip
+@myip:  lda #<m_myip
         ldx #>m_myip
         jsr print
         ldx #0
@@ -504,11 +512,30 @@ fuji1:  sta DCOMND
         rts
 .endif
 
-; print: EOL-terminated string at X:A
-print:  sta ICBAL
-        stx ICBAH
-        lda #$09                ; PUT RECORD
-        bne cio120
+; print: message at X:A - one or more EOL-terminated lines, then a 0
+print:  sta ptr
+        stx ptr+1
+@line:  lda ptr
+        sta ICBAL
+        lda ptr+1
+        sta ICBAH
+        lda #$09                ; PUT RECORD (stops after the EOL)
+        jsr cio120
+        ldy #0
+:       lda (ptr),y             ; step over the line just printed
+        iny
+        cmp #EOL
+        bne :-
+        tya
+        clc
+        adc ptr
+        sta ptr
+        bcc :+
+        inc ptr+1
+:       ldy #0
+        lda (ptr),y
+        bne @line
+        rts
 ; input: read a line into `line`
 input:  lda #<line
         sta ICBAL
@@ -595,19 +622,22 @@ pause:  lda #<m_pause
 
 welcomed:   .byte 0
 
-m_banner:   .byte "BALLBLAZER NETPLAY", EOL
+m_banner:   .byte "BALLBLAZER NETPLAY", EOL, 0
 m_bad:      .byte "THIS IS NOT THE GAME IMAGE THE NETPLAY", EOL
-            .byte "PATCH WAS MADE FOR. LOCAL GAME ONLY.", EOL
-m_nofuji:   .byte "NO FUJINET ANSWERED. LOCAL GAME ONLY.", EOL
-m_myip:     .byte "THIS ATARI'S ADDRESS:", EOL
+            .byte "PATCH WAS MADE FOR. LOCAL GAME ONLY.", EOL, 0
+m_nofuji:   .byte "NO FUJINET ANSWERED. LOCAL GAME ONLY.", EOL, 0
+m_myip:     .byte "THIS ATARI'S ADDRESS:", EOL, 0
+m_noip:     .byte "THIS FUJINET DOES NOT KNOW ITS OWN", EOL
+            .byte "ADDRESS. LOOK IT UP IN THE NETWORK", EOL
+            .byte "SETTINGS OF THE DEVICE IT RUNS ON.", EOL, 0
 m_askip:    .byte "OPPONENT'S ADDRESS", EOL
-            .byte "(JUST RETURN = LOCAL GAME)", EOL
-m_askrole:  .byte "H = HOST, TOP    J = JOIN, BOTTOM", EOL
-m_askdelay: .byte "INPUT DELAY, 3-9 FRAMES (RETURN = 5)", EOL
-m_nostream: .byte "FUJINET REFUSED NETSTREAM MODE.", EOL
-m_wait:     .byte "WAITING FOR OPPONENT. START = GIVE UP", EOL
-m_differ:   .byte "OPPONENT HAS A DIFFERENT VERSION.", EOL
-m_pause:    .byte "PRESS START", EOL
+            .byte "(JUST RETURN = LOCAL GAME)", EOL, 0
+m_askrole:  .byte "H = HOST, TOP    J = JOIN, BOTTOM", EOL, 0
+m_askdelay: .byte "INPUT DELAY, 3-9 FRAMES (RETURN = 5)", EOL, 0
+m_nostream: .byte "FUJINET REFUSED NETSTREAM MODE.", EOL, 0
+m_wait:     .byte "WAITING FOR OPPONENT. START = GIVE UP", EOL, 0
+m_differ:   .byte "OPPONENT HAS A DIFFERENT VERSION.", EOL, 0
+m_pause:    .byte "PRESS START", EOL, 0
 
 fbuf:       .res 140
 line:       .res 124

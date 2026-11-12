@@ -29,7 +29,8 @@ it like the original: it stays on your machines.
 brew install cc65                 # ca65 / ld65; python3 and make come with Xcode tools
 md5 rom/ballblazer.atr            # must print a37afb54b6edbd03c348efa0b714d37c
 make test && make disk
-md5 build/ballblazer-net.atr      # 077bfb16df15d7fe87d7691a99847872 at commit 103b0d4+
+md5 build/ballblazer-net.atr      # see `git log -1` - the commit message of the
+                                  # last code change records the expected md5
 ```
 
 The input image is the file
@@ -48,6 +49,9 @@ the emulator tests run there too (see the end of this document).
 
 1. Put `ballblazer-net.atr` on both FujiNets as D1: and boot both Ataris.
 2. Each shows `THIS ATARI'S ADDRESS:` and its IP. Tell each other.
+   (A FujiNet-PC — emulators, phone apps — does not know its host's
+   address; the lobby then says so, and you look the address up in that
+   device's network settings instead.)
 3. Type the **opponent's** address and RETURN. (Just RETURN = the ordinary
    local game, completely unpatched.)
 4. One player answers **H** (host, player 1, top view) and picks an input
@@ -93,6 +97,9 @@ An emulator can stand in for a real Atari + FujiNet if **all three** hold:
 2. the FujiNet-PC it talks to is built from firmware v1.6.0 or later;
 3. each emulated machine is on a **different IP address** — both ends listen
    on UDP 6502, so two instances on one computer collide.
+
+FujiNet-PC always reports its own address as 127.0.0.1, so the lobby asks you
+to look it up on the host device instead of showing it.
 
 Fujisan (libatari800 + a bundled FujiNet-PC) fits that shape; whether a given
 release has points 1 and 2 depends on what it bundles. Serving the `.atr`

@@ -41,8 +41,8 @@ bytes) from the Internet Archive item
 If your output md5 differs but `make test` passes, compare
 `build/np/np0.resident` and `build/np/np0.lobby` first: a different cc65
 release could in principle assemble a byte differently (this was built with
-cc65 2.18 / 2.19). `make test` and `make disk` are all a Mac needs; the
-emulator tests (`make nptest`) are Linux-only — the rig uses Xvfb and `/proc`.
+cc65 2.18 / 2.19). `make test` and `make disk` are all a Mac needs to build;
+the emulator tests run there too (see the end of this document).
 
 ## Play
 
@@ -134,10 +134,51 @@ the link is sound.
 
 ## Running the emulator tests yourself
 
+They need `rom/ballblazer.atr` and the stock `atari800` emulator, and take
+about five minutes.
+
+**Linux**
+
 ```sh
 sudo apt-get install atari800 xvfb imagemagick python3-pil
+python3 tools/rig.py selfcheck     # is the rig stable and frame-exact here?
 make nptest
 ```
 
-They need `rom/ballblazer.atr` and take a few minutes. The rig runs the stock
-`atari800` 5.0 under a private Xvfb display; see `tools/rig.py`.
+**macOS**
+
+```sh
+brew install atari800 cc65
+python3 tools/rig.py selfcheck
+make nptest
+```
+
+`selfcheck` prints the emulator version and how the rig detects that the
+emulator is idle, then runs the same scripted session twice and compares
+memory; run it first on a new machine. Three knobs, all environment
+variables:
+
+| variable | effect |
+|---|---|
+| `ATARI800=/path/to/atari800` | use a specific emulator binary |
+| `RIG_VIDEO=0` | no screenshots even if Xvfb is installed |
+| `RIG_IDLE=generic` | fall back to a timing-based idle test if the native one misbehaves |
+
+Differences between the two systems:
+
+- Screenshots (`build/shots/`) need Xvfb and are Linux-only. On macOS the
+  emulator runs with SDL's dummy video driver; the tests' verdicts do not
+  depend on pictures.
+- To know when the emulator has run everything it was fed, the rig asks
+  `/proc` on Linux and `libproc` on macOS. The Linux path and the generic
+  fallback are exercised here; **the macOS path has not been run by the
+  author** — `selfcheck` is the test of it.
+- The rig was developed against atari800 5.0.0 (what Debian/Ubuntu ship).
+  Homebrew has a newer release. The input-playback file format the rig
+  writes is the same in every release up to 7.2.1; it changed on the
+  emulator's development branch after that. Newer emulator versions may also
+  time the serial port slightly differently, which is worth knowing about if
+  `npserial` disagrees between the two systems.
+
+The rig runs the emulator with a private, empty configuration, so it uses the
+built-in Altirra OS regardless of your `~/.atari800.cfg`. See `tools/rig.py`.

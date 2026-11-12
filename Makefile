@@ -9,8 +9,9 @@
 #   make disasm / rebuild / dump / dump-run / findings   reverse-engineering aids
 #   make clean
 #
-# Toolchain: cc65 (ca65/ld65/da65) + atari800 5.0 + python3. Debian/Ubuntu:
-#   sudo apt-get install cc65 atari800 python3 python3-pil xvfb imagemagick
+# Toolchain: cc65 (ca65/ld65/da65) + python3; atari800 for the emulator tests.
+#   Debian/Ubuntu: sudo apt-get install cc65 atari800 python3 python3-pil xvfb imagemagick
+#   macOS:         brew install cc65 atari800
 # ============================================================================
 
 CA65  := ca65

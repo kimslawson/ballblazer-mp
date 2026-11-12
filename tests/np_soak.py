@@ -43,7 +43,7 @@ def main():
     ever = {}
     bad = []
     ticks = 0
-    with Link(delay=24, seed=seed * 7919 + 1, video=True) as k:
+    with Link(delay=24, seed=seed * 7919 + 1) as k:
         k.run(30)
         k.run(2, hin=dict(start=True))
         k.run(8)

@@ -47,7 +47,7 @@ def build(delay, seed):
 
 
 class Link:
-    def __init__(self, delay=24, seed=0x1234, video=False):
+    def __init__(self, delay=24, seed=0x1234, video=None):
         build(delay, seed)
         self.L = labels(os.path.join(ROOT, "build/np/np1.lbl"))
         self.h = Rig(os.path.join(ROOT, "build/np/test-host.atr"),

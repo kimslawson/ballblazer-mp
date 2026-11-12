@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """rig - frame-exact, scriptable atari800 with REAL inputs and screenshots.
 
-Drives the stock `atari800` (5.0) three ways at once:
+Drives the stock `atari800` (developed against 5.0.0; the playback format
+it relies on is the same up to 7.2.1) three ways at once:
 
   * INPUT, frame by frame: the emulator's `-playback` file is a named pipe that
     this driver feeds one frame record at a time. Joysticks, triggers and the
@@ -10,7 +11,12 @@ Drives the stock `atari800` (5.0) three ways at once:
     (it blocks on the pipe otherwise) - deterministic lockstep.
   * the built-in monitor over a pty (peek/poke, dumps, save states, PC
     breakpoints, 6502 trace);
-  * screenshots (PNG) from a private Xvfb display.
+  * screenshots (PNG) from a private Xvfb display - where Xvfb exists. On
+    macOS (or with video=False) the emulator runs with SDL's dummy video
+    driver and shot() quietly does nothing; everything else is the same.
+
+Linux and macOS. `python3 tools/rig.py selfcheck` verifies that the rig is
+stable and frame-exact on the machine it runs on.
 
 It touches only your own local disk image and writes under build/ (git-ignored).
 
@@ -22,11 +28,14 @@ It touches only your own local disk image and writes under build/ (git-ignored).
         r.shot("build/shots/a.png")
         ram = r.dump()                    # bytes $0000-$FFFF (enters monitor)
 """
+import ctypes
 import fcntl
+import hashlib
 import os
 import pty
 import re
 import select
+import shutil
 import signal
 import struct
 import subprocess
@@ -56,10 +65,12 @@ def stick(s):
 
 
 class Rig:
-    def __init__(self, disk, display=None, video=True, extra=(), ntsc=True,
+    def __init__(self, disk, display=None, video=None, extra=(), ntsc=True,
                  machine="-xl"):
         self.disk = disk
         self.display = display or ":%d" % (70 + os.getpid() % 25)
+        if video is None:                  # screenshots only where possible
+            video = have_video()
         self.video = video
         self.extra = list(extra)
         self.ntsc = ntsc
@@ -76,11 +87,13 @@ class Rig:
 
     # ---- lifecycle -------------------------------------------------------
     def __enter__(self):
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        self.exe = os.environ.get("ATARI800") or shutil.which("atari800")
+        if not self.exe:
+            raise RuntimeError("atari800 not found (set ATARI800=/path/to/it)")
         self.tmp = tempfile.mkdtemp(prefix="rig")
         self.fifo = os.path.join(self.tmp, "input.fifo")
         os.mkfifo(self.fifo)
-        env = dict(os.environ, HOME="/root", SDL_AUDIODRIVER="dummy")
+        env = dict(os.environ, SDL_AUDIODRIVER="dummy")
         self.xvfb = None
         if self.video:
             self.xvfb = subprocess.Popen(
@@ -94,15 +107,23 @@ class Rig:
             env.update(DISPLAY=self.display, SDL_VIDEODRIVER="x11")
         else:
             env.update(SDL_VIDEODRIVER="dummy")
-        args = ["atari800", "-monitor", "-nobasic", "-nosound", "-turbo",
-                self.machine, "-ntsc" if self.ntsc else "-pal",
+        # A private, empty configuration: no ROM paths, so the emulator's
+        # built-in (Altirra) OS is used whatever ~/.atari800.cfg says. The
+        # tests' timing was established with that OS.
+        args = [self.exe, "-config", os.path.join(self.tmp, "atari800.cfg"),
+                "-monitor", "-nobasic", "-nosound", "-turbo",
+                self.machine, "-xl-rev", "altirra",
+                "-ntsc" if self.ntsc else "-pal",
                 "-playback", self.fifo]
         args += self.extra
         if self.disk:
             args.append(self.disk)
         self.master, slave = pty.openpty()
+        # own session: a Ctrl-C in the terminal reaches this driver only (the
+        # emulator would take it as "enter the monitor" at a random moment)
         self.p = subprocess.Popen(args, stdin=slave, stdout=slave,
-                                  stderr=slave, env=env, close_fds=True)
+                                  stderr=slave, env=env, close_fds=True,
+                                  start_new_session=True)
         os.close(slave)
         # The emulator opens the FIFO for reading during init; this open
         # unblocks it. It then expects the two header lines.
@@ -123,7 +144,7 @@ class Rig:
                 self.brk()
             self._send("QUIT")
             self.p.wait(timeout=3)
-        except Exception:
+        except BaseException:
             self.p.kill()
         if self.xvfb:
             self.xvfb.terminate()
@@ -132,11 +153,7 @@ class Rig:
                 os.close(fd)
             except OSError:
                 pass
-        try:
-            os.unlink(self.fifo)
-            os.rmdir(self.tmp)
-        except OSError:
-            pass
+        shutil.rmtree(self.tmp, ignore_errors=True)
 
     # ---- pty plumbing ----------------------------------------------------
     def _send(self, line):
@@ -282,44 +299,82 @@ class Rig:
             self.step(hold, key=self.KEYCODE[ch.upper()])
             self.step(gap)
 
-    def _fifo_fd(self):
-        """The emulator's file descriptor for our input pipe."""
-        d = "/proc/%d/fd" % self.p.pid
-        for n in os.listdir(d):
-            try:
-                if os.readlink(os.path.join(d, n)) == self.fifo:
-                    return int(n)
-            except OSError:
-                pass
-        raise RuntimeError("emulator has not opened the input pipe")
+    # ---- "has the emulator run everything it was fed?" -------------------
+    # The emulator may only be signalled while it sleeps in read() on the
+    # input pipe. How to see that from outside depends on the system.
+    def _idle_linux(self):
+        """Exact: /proc says which system call the process is blocked in."""
+        if self._fd is None:
+            d = "/proc/%d/fd" % self.p.pid
+            for n in os.listdir(d):
+                try:
+                    if os.readlink(os.path.join(d, n)) == self.fifo:
+                        self._fd = int(n)
+                except OSError:
+                    pass
+            if self._fd is None:
+                raise RuntimeError("emulator has not opened the input pipe")
+        f = open("/proc/%d/syscall" % self.p.pid).read().split()
+        return len(f) > 1 and f[0] == "0" and int(f[1], 16) == self._fd
+
+    def _idle_darwin(self):
+        """macOS: no thread of the process is runnable (libproc). The only
+        things the emulator ever waits for are the input pipe and its
+        terminal, and the terminal is kept drained - so three such samples in
+        a row mean it is starved for input."""
+        if self._fd is None:
+            self._fd = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+            self._pti = ctypes.create_string_buffer(96)   # struct proc_taskinfo
+        n = self._fd.proc_pidinfo(self.p.pid, 4, ctypes.c_uint64(0),
+                                  self._pti, 96)          # PROC_PIDTASKINFO
+        if n != 96:
+            raise OSError("proc_pidinfo failed")
+        return struct.unpack_from("i", self._pti, 88)[0] == 0   # pti_numrunning
+
+    def _idle_generic(self):
+        """Fallback: the pipe is empty (the caller then waits a while)."""
+        n = struct.unpack("i", fcntl.ioctl(self.w, termios.FIONREAD,
+                                           b"\0\0\0\0"))[0]
+        return n == 0
+
+    def idle_method(self):
+        m = os.environ.get("RIG_IDLE")
+        if not m:
+            m = {"linux": "linux", "darwin": "darwin"}.get(sys.platform,
+                                                             "generic")
+        return m
 
     def _wait_blocked(self, timeout=180):
-        """Wait until the emulator is asleep in read() on the input pipe, i.e.
-        it has executed every frame it was given and is starved for more."""
-        if self._fd is None:
-            self._fd = self._fifo_fd()
-        path = "/proc/%d/syscall" % self.p.pid
+        """Wait until the emulator has executed every frame it was given and
+        is asleep waiting for more."""
+        method = self.idle_method()
+        probe = getattr(self, "_idle_" + method)
+        need = {"linux": 1, "darwin": 3, "generic": 25}[method]
+        streak = 0
         end = time.time() + timeout
         while time.time() < end:
-            got = self._read_some(0.0005)      # keep the pty drained
-            if got:
+            got = self._read_some(0.0005 if method == "linux" else 0.002)
+            if got:                            # keep the pty drained
                 self.buf = (self.buf + got)[-2000:]
+                streak = 0
                 continue
+            if self.p.poll() is not None:
+                raise RuntimeError("emulator exited (%s); it said: %r"
+                                   % (self.p.returncode, self.buf[-400:]))
             try:
-                f = open(path).read().split()
+                streak = streak + 1 if probe() else 0
             except OSError:
-                raise RuntimeError("emulator exited; it said: %r"
-                                   % self.buf[-400:])
-            if len(f) > 1 and f[0] == "0" and int(f[1], 16) == self._fd:
+                streak = 0
+            if streak >= need:
                 return
         raise TimeoutError("emulator never went idle")
 
     def brk(self):
         """Enter the monitor at a frame boundary. Costs one 16-frame slice.
 
-        The emulator is only ever signalled while it is blocked on the input
-        pipe: atari800 5.0 services SIGINT wherever it happens to be, which is
-        not safe mid-frame or inside the monitor."""
+        The emulator is only ever signalled while it is asleep on the input
+        pipe; signalling it mid-frame or inside the monitor proved unreliable
+        with atari800 5.0."""
         if self.in_monitor:
             return
         self.sync()
@@ -387,7 +442,8 @@ class Rig:
     def shot(self, path):
         """Screenshot (PNG, 2x). The window only exists while the emulator is
         running, so leave the monitor and render two more frames first."""
-        assert self.video, "Rig(video=False) cannot take screenshots"
+        if not self.video:
+            return None
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         self.sync()
         time.sleep(0.12)
@@ -403,9 +459,74 @@ class Rig:
         return path
 
 
+def have_video():
+    """Can we take screenshots here? (Xvfb + ImageMagick + Pillow)
+    RIG_VIDEO=0 forces headless operation."""
+    if os.environ.get("RIG_VIDEO") == "0":
+        return False
+    if not (shutil.which("Xvfb") and shutil.which("import")):
+        return False
+    try:
+        import PIL  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def emulator_version():
+    exe = os.environ.get("ATARI800") or shutil.which("atari800")
+    if not exe:
+        return None
+    out = subprocess.run([exe, "-v"], capture_output=True, text=True).stdout
+    m = re.search(r"Version\s+([0-9.]+)", out)
+    return m.group(1) if m else out.strip()
+
+
+def selfcheck(disk):
+    """Is the rig trustworthy on this machine?
+       1. stable: 300 break/continue cycles without losing the emulator;
+       2. frame-exact: two runs fed the same input end in identical memory."""
+    ver = emulator_version()
+    print("platform %s, atari800 %s, idle detection: %s, screenshots: %s"
+          % (sys.platform, ver, Rig(None).idle_method(),
+             "yes" if have_video() else "no"))
+    if ver is None:
+        print("FAIL: atari800 not found")
+        return 1
+    try:
+        v = tuple(int(x) for x in ver.split(".")[:3])
+    except ValueError:
+        v = (0,)
+    if v > (7, 2, 1):
+        print("note: atari800 changed its playback file format after 7.2.1; "
+              "this rig writes the format of 5.0 - 7.2.1 and may not work")
+    elif v < (5, 0, 0):
+        print("note: untested with atari800 older than 5.0")
+    sums = []
+    for run in range(2):
+        with Rig(disk) as r:
+            r.step(704)
+            for i in range(150):
+                r.step(16, joy0="UDLR"[i % 4], trig0=(i % 7 == 0),
+                       start=(i == 3))
+                r.poke(0x0600, i & 0xFF)       # forces a monitor round trip
+            ram = r.dump(0x0000, 0xBFFF)
+            sums.append(hashlib.md5(ram).hexdigest())
+            print("run %d: %d frames, memory md5 %s" % (run + 1, r.fed, sums[-1]))
+    if sums[0] != sums[1]:
+        print("FAIL: two identical runs ended in different memory - the rig "
+              "is not frame-exact here")
+        return 1
+    print("PASS: stable (300 monitor round trips) and frame-exact")
+    return 0
+
+
 if __name__ == "__main__":
-    disk = sys.argv[1] if len(sys.argv) > 1 else "rom/ballblazer.atr"
+    args = sys.argv[1:]
+    if args and args[0] == "selfcheck":
+        sys.exit(selfcheck(args[1] if len(args) > 1 else "rom/ballblazer.atr"))
+    disk = args[0] if args else "rom/ballblazer.atr"
     with Rig(disk) as r:
         r.step(600)
-        print(r.regs(), "frame", r.frame)
+        print(r.regs(), "frame", r.fed)
         print(r.shot("build/shots/boot.png"))

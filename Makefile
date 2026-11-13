@@ -63,6 +63,7 @@ nplock:
 npserial:
 	$(PY) tests/np_serial.py client
 	$(PY) tests/np_serial.py host
+	$(PY) tests/np_serial.py host-auto
 
 # run the serial test, then watch it: the same session replayed in a normal
 # emulator window at real speed, with sound (ROLE=host for the other side)

@@ -15,6 +15,13 @@ the match stay alive.
 
 On the Atari, enter this computer's IP address as the opponent's address.
 Both ends use UDP port 6502.
+
+While the game runs vpeer prints, every two seconds: the tick it has reached
+and how many ticks per second it managed (60 = full speed), how much of the
+time it stood still waiting for the Atari's inputs, the round-trip time of the
+link, and how often it had to resend. That is the place to look when play
+stutters: a round trip longer than the input delay means the delay is too
+small; resends mean packets are being lost.
 """
 import argparse
 import random
@@ -25,7 +32,7 @@ import time
 import npproto as P
 
 TICK = 1 / 59.92          # NTSC frame
-T_O = 8 * TICK            # host retransmit timeout (as on the Atari)
+T_O = 30 * TICK           # host retransmit timeout (as on the Atari)
 BEACON = 32 * TICK        # client START / HELLO repeat
 
 
@@ -81,6 +88,29 @@ def run(args):
         if peer:
             sock.sendto(pkt, peer)
 
+    def recv():
+        """One valid packet or None."""
+        nonlocal peer
+        try:
+            data, src = sock.recvfrom(64)
+        except socket.timeout:
+            return None
+        peer = src
+        got = None
+        for p in par.feed(data):
+            got = p
+        return got
+
+    def ping(timeout=2.0):
+        """Round-trip time in seconds, or None."""
+        t = time.time()
+        send(P.packet(P.T_PING))
+        while time.time() - t < timeout:
+            p = recv()
+            if p and p[0] & 7 == P.T_PING:
+                return time.time() - t
+        return None
+
     # ---- lobby ------------------------------------------------------------
     last = 0.0
     welcomed = False
@@ -90,31 +120,41 @@ def run(args):
             send(P.packet(P.T_HELLO, bytes([P.VERSION, P.GAME_SUM & 255,
                                             P.GAME_SUM >> 8])))
             last = now
-        try:
-            data, src = sock.recvfrom(64)
-        except socket.timeout:
-            continue
-        peer = src
-        got = None
-        for p in par.feed(data):
-            got = p
+        got = recv()
         if got is None:
             continue
         kind = got[0] & 7
         if host and kind == P.T_HELLO:
             body = got[1:-1]
             if body[0] != P.VERSION or body[1] | body[2] << 8 != P.GAME_SUM:
-                print("vpeer: the Atari runs a different version/image")
+                print("vpeer: the Atari runs a different version/image "
+                      "(it says version %d)" % body[0])
                 continue
+            if not welcomed and delay is None:
+                ping()                                  # one to settle
+                trips = [ping() for _ in range(8)]
+                if None in trips:
+                    delay = P.DELAY_DEFAULT
+                    print("vpeer: could not time the link; delay %d" % delay)
+                else:
+                    frames8 = int(round(sum(trips) / TICK))
+                    delay = P.delay_for(frames8)
+                    print("vpeer: round trip %.0f ms (min %.0f, max %.0f) -> "
+                          "delay %d frames" % (1000 * sum(trips) / 8,
+                                               1000 * min(trips),
+                                               1000 * max(trips), delay))
             send(P.packet(P.T_WELCOME, bytes([seed & 255 | 1, seed >> 8, delay])))
             welcomed = True
-            print("vpeer: HELLO from %s - WELCOME sent (delay %d)" % (src[0], delay))
+            print("vpeer: HELLO from %s - WELCOME sent (delay %d)" % (peer[0], delay))
         elif host and kind == P.T_START and welcomed:
             break
+        elif not host and kind == P.T_PING:
+            send(P.packet(P.T_PING))                    # the host is timing us
+            last = time.time() + 1.5                    # ... keep quiet meanwhile
         elif not host and kind == P.T_WELCOME:
             delay = got[3]
             send(P.packet(P.T_START))
-            print("vpeer: WELCOME from %s (delay %d) - START sent" % (src[0], delay))
+            print("vpeer: WELCOME from %s (delay %d) - START sent" % (peer[0], delay))
             break
 
     # ---- game -------------------------------------------------------------
@@ -123,21 +163,22 @@ def run(args):
     t0 = time.time()
     heard = 0.0 if host else time.time()
     beacon = time.time()
-    stats = dict(rx=0, tx=0, resend=0)
-    shown = time.time()
-    last_byte = time.time()
+    shown = last_byte = sent_at = time.time()
+    st = dict(rx=0, tx=0, resend=0, rtt=[], stall=0.0, tick0=0)
     while True:
         now = time.time()
-        # our clock: never run ahead of real time, never past the peer's inputs
+        # our clock: never ahead of real time, never past the peer's inputs
         while pl.tick < (now - t0) / TICK:
             if not pl.advance():
-                t0 += TICK          # stalled: wall time does not count
+                t0 += TICK          # stalled: this frame of wall time is lost
+                st["stall"] += TICK
                 break
         if host and now - heard > T_O:
+            first = ep.tx is None
             send(ep.kick())
-            stats["tx"] += 1
-            stats["resend"] += ep.tx is not None and heard > 0
-            heard = now
+            st["tx"] += 1
+            st["resend"] += not first
+            heard = sent_at = now
         if not host and not ep.got_data and now - beacon > BEACON:
             send(P.packet(P.T_START))
             beacon = now
@@ -150,16 +191,30 @@ def run(args):
                 par.idle()
             last_byte = now
             for p in par.feed(data):
-                stats["rx"] += 1
+                st["rx"] += 1
+                before = ep.seq
                 reply = ep.on_packet(p)
                 if reply:
+                    if ep.seq != before or not host:
+                        # host: time from our packet to its answer;
+                        # client: time between the host's packets
+                        st["rtt"].append(now - sent_at)
+                        sent_at = now
                     send(reply)
-                    stats["tx"] += 1
+                    st["tx"] += 1
                     heard = now
         if now - shown > 2:
-            print("vpeer: tick %6d  peer inputs to %6d  rx %d tx %d resent %d"
-                  % (pl.tick, len(ep.remote), stats["rx"], stats["tx"],
-                     stats["resend"]))
+            r = st["rtt"]
+            span = now - shown
+            print("vpeer: tick %6d (%2.0f/s, stalled %2.0f%%)  %s %3.0f ms "
+                  "(max %3.0f)  rx %d tx %d resent %d"
+                  % (pl.tick, (pl.tick - st["tick0"]) / span,
+                     100 * st["stall"] / span,
+                     "round trip" if host else "host cycle",
+                     1000 * sum(r) / len(r) if r else 0,
+                     1000 * max(r) if r else 0,
+                     st["rx"], st["tx"], st["resend"]))
+            st.update(rtt=[], stall=0.0, tick0=pl.tick)
             shown = now
 
 
@@ -217,8 +272,9 @@ def main():
     ap.add_argument("mode", choices=["host", "join", "selftest"])
     ap.add_argument("atari", nargs="?", help="the Atari's FujiNet address (join)")
     ap.add_argument("--port", type=int, default=P.PORT)
-    ap.add_argument("--delay", type=int, default=5,
-                    help="input delay in frames when hosting (3-9)")
+    ap.add_argument("--delay", type=int, default=None,
+                    help="input delay in frames when hosting (3-20); "
+                         "default: time the link and choose")
     args = ap.parse_args()
     if args.mode == "selftest":
         sys.exit(selftest())

@@ -18,9 +18,9 @@ identical simulation, tick for tick, and exchange only controller inputs:
   opponent's input has not arrived, the frame is skipped: the game waits, it
   never guesses and never diverges.
 - A local input sampled while tick *T* runs is scheduled for tick *T + delay*
-  and sent to the peer in the meantime. `delay` (3–9 frames, chosen by the
-  host, default 5) hides the network round trip; it is the only latency the
-  player feels.
+  and sent to the peer in the meantime. `delay` (3–20 frames; the host's
+  lobby times the link and picks it) hides the network round trip; it is the
+  only latency the player feels.
 - Everything else the tick reads from hardware is virtualised so that both
   machines see the same values:
   - joystick, trigger, console keys and keyboard reads are redirected to
@@ -54,7 +54,7 @@ code to the game's load stream; at boot the lobby patches the copy in RAM:
 | controller/console/keyboard reads | operands → `v_*` bytes | inputs come from the streams |
 | 17 × `LDA RANDOM`, 3 × `CMP`, 1 × `LDY` | `JSR prng` / operands → PRNG state | shared randomness |
 | two display-interrupt facing latches | `NOP`s | facing is latched per tick |
-| `$797B` sound commit | `JMP mix` | POKEY voices 3+4 are the serial clock |
+| `$797B` sound commit | `JMP mix` | POKEY voices 3+4 are the serial clock; play the two loudest of the game's four voices |
 | IRQEN / SKCTL / AUDCTL writes | operands → a dummy byte | hands off the serial port |
 | end of each display kernel | `JSR` → `dli_a` / `dli_b` | re-enable IRQs for a long routine |
 | `$A439` | `JSR $4C41` → `JSR $4CBE` | repair a damaged byte in the image (see findings) |
@@ -65,7 +65,7 @@ Choosing "local game" in the lobby (just RETURN) applies none of this.
 
 | region | use |
 |---|---|
-| `$BC00–$BFFF` | resident code. Held the original tape loader; dead once the game runs. 922 of 1024 bytes used. |
+| `$BC00–$BFFF` | resident code. Held the original tape loader; dead once the game runs. 1001 of 1024 bytes used. |
 | `$0224–$02F8` | second resident chunk, copied there at launch. OS variables, unused after the game takes over (it never calls the OS). |
 | `$0180–$01B9` | link state. Bottom of the stack page; the lowest stack pointer seen in play is `$EE`. |
 | `$0100–$017F` | the two input rings (64 ticks each). |

@@ -3,37 +3,47 @@
 ## Felt latency
 
 The only delay a player experiences is the **input delay**: a stick movement
-takes effect `delay` frames later, on both machines at once. The host chooses
-it in the lobby (3–9, default 5 = 83 ms). Both craft, the ball and the score
-are always consistent; there is no rubber-banding and no "who had the ball"
-dispute, because there is only one game.
+takes effect `delay` frames later, on both machines at once. Both craft, the
+ball and the score are always consistent; there is no rubber-banding and no
+"who had the ball" dispute, because there is only one game.
 
-If an input has not arrived by the time its tick is due, that machine skips
-frames until it has: a visible stutter, never an inconsistency. Too small a
-delay shows up as stutter, too large as sluggish steering.
+## How much delay a link needs
 
-## Round trip (estimate)
+The link is a ping-pong, and what a packet says is "here are my inputs up to
+my current tick + delay". So between two packets from the other side a
+machine can run at most `delay` ticks: **full speed needs delay >= round trip,
+in frames.** With less, the game runs at `delay / round trip` of full speed,
+in bursts - it stutters, evenly on both machines, and the music with it.
 
-A typical packet is 3 bytes. At 2400 baud:
+The host's lobby therefore times the link (eight round trips) and sets the
+delay to a quarter more than one round trip, plus one frame. A number typed at
+the prompt overrides that: smaller is snappier but stutters if it is below the
+round trip; larger is smooth but sluggish.
 
-| step | time |
-|---|---|
-| 3 bytes on the wire, Atari → FujiNet | 12.5 ms |
-| FujiNet batches up to 3 ms, then UDP over Wi-Fi | ~3–6 ms |
-| FujiNet → Atari, paced at the line rate | first byte lags ~4 ms; the packet completes ~12.5 ms after it started arriving |
-| worst-case wait for a display kernel before the last byte is read | 3.3 ms |
+## Round trips, estimated and measured
 
-One direction: roughly 20–25 ms. A full host → client → host cycle: 40–50 ms,
-i.e. about three frames, during which each side accumulates three ticks of
-input — still one run-length byte if the stick did not move.
+A typical packet is 3 bytes: 12.5 ms on the wire at 2400 baud, each way.
 
-An input sampled just after a packet left waits one cycle for the next packet
-and one half-cycle to arrive: 60–75 ms. Hence the default delay of 5 frames;
-4 may hold on a quiet network, 3 is optimistic.
+| setup | round trip | delay chosen |
+|---|---|---|
+| two real Ataris + FujiNets (estimate from the firmware source; not measured) | 40-50 ms | 4-5 frames |
+| two emulators with built-in FujiNet-PC on a LAN (first field test, an iPad and an iPhone) | about 130 ms | 11 frames |
 
-These are computed from the firmware source and the baud rate, **not measured
-on hardware**. The emulator's cassette model in `tests/np_serial.py` reproduces
-the byte timing (one byte per 65 scanlines) but not Wi-Fi.
+The emulator figure comes from a screen recording of that test: with the then
+fixed delay of 5 the match clock ran at 65 % of real time, i.e. 5 ticks per
+round trip of ~130 ms. Emulators are slower than hardware here for a
+structural reason: they run each frame in a burst and then sleep, so serial
+bytes that the FujiNet side paces out in real time (one per 4.2 ms) are only
+picked up at the next frame - each direction costs an extra frame or two.
+
+That first test also showed why the retransmission timeout must be far above
+the round trip: it was 8 frames (133 ms), right on top of the actual round
+trip, so the host kept resending while answers were still in flight. It is
+now 30 frames.
+
+`tools/vpeer.py` prints the round trip, the achieved tick rate and the share
+of time spent waiting, every two seconds - the instrument for any link that
+misbehaves.
 
 ## Why 2400 baud and not faster
 

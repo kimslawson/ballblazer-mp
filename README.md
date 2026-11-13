@@ -12,7 +12,8 @@ rig. It does **not** contain the game.
 
 ## Status
 
-**Playable in emulation; not yet run on real hardware.**
+**Playable. First played over a real network between two emulators with
+built-in FujiNets (an iPad and an iPhone); not yet run on real Ataris.**
 
 - Two emulated Ataris running the patched disk play a full match in lockstep
   and stay bit-identical in every byte the simulation uses, under 30 % packet
@@ -36,7 +37,8 @@ seeded generator both sides share. There is only ever one game state, so the
 ball, the score and every collision agree by construction. The link is
 FujiNet's raw serial-to-UDP bridge at 2400 baud — slow on purpose, because
 the game's display interrupts keep the CPU for 3.3 ms at a time. What a
-player feels is a fixed input delay (default 83 ms).
+player feels is a fixed input delay, which the lobby sets from the measured
+round trip of the link.
 [`docs/01-architecture.md`](docs/01-architecture.md) has the detail.
 
 ## Quick start

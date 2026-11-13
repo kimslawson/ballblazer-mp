@@ -37,11 +37,15 @@ TEST = 0
 NOFUJI = 0                      ; 1 = serial-driver test build: the two FujiNet
 .endif                          ;     commands are skipped (as if they succeeded)
 
-VERSION   = 1                   ; protocol version (HELLO)
+VERSION   = 2                   ; protocol version (HELLO)
 PORT      = 6502                ; UDP port, both ends
 T_START   = 1
 T_HELLO   = 2
 T_WELCOME = 3
+T_PING    = 4                   ; lobby only: echoed back, to time the link
+DELAY_MIN = 3
+DELAY_MAX = 20
+DELAY_DEF = 9                   ; if the link cannot be timed
 NEUTRAL   = $0F
 LRING     = $0100
 RRING     = $0140
@@ -135,19 +139,35 @@ start:
         beq @role
         cmp #'H'
         bne @askrole
-        ; ---- the host picks the input delay (it travels in WELCOME)
+        ; ---- the host sets the input delay (it travels in WELCOME): a
+        ;      number, or just RETURN to have the link timed
         lda #<m_askdelay
         ldx #>m_askdelay
         jsr print
         jsr input2
         lda line2
-        cmp #'3'
-        bcc :+
-        cmp #'9'+1
-        bcs :+
-        and #$0F
+        jsr digit
+        bcs @auto               ; no number typed
+        sta cnt
+        lda line2+1
+        jsr digit
+        bcs :+                  ; one digit
+        sta cnt+1
+        lda cnt                 ; two digits: tens * 10 + ones
+        asl a
+        asl a
+        adc cnt
+        asl a
+        adc cnt+1
+        sta cnt
+:       lda cnt
+        cmp #DELAY_MIN
+        bcc @auto
+        cmp #DELAY_MAX+1
+        bcs @auto
         sta cfg_delay
-:       ldx #$00
+        inc delay_set
+@auto:  ldx #$00
 @role:  stx cfg_role
 
         ; ---- NetStream towards the opponent: host string, NUL, flags, AUDF3
@@ -226,6 +246,9 @@ host:   jsr getpkt              ; -> A = type (waits; START key cancels)
         lda RANDOM
         sta rnd1
         inc welcomed
+        lda delay_set           ; no delay typed: time the link and pick one
+        bne :+
+        jsr measure
 :       lda rnd0
         sta txbuf+1
         lda rnd1
@@ -271,7 +294,18 @@ client: lda #VERSION
         bne @listen
         beq client
 @got:   jsr getpkt
-        cmp #T_WELCOME
+        cmp #T_PING
+        bne :+
+        lda #T_PING             ; the host is timing the link: echo, and
+        ldy #0                  ;   keep quiet a while longer
+        jsr send
+        lda RTCLOK
+        clc
+        adc #90
+        sta cnt
+        bne @listen
+        beq @listen
+:       cmp #T_WELCOME
         bne @listen
         lda rxbuf+1
         sta rnd0
@@ -433,6 +467,112 @@ send:   sei
 :       lda tx_busy
         bne :-
         rts
+
+; digit: A = ATASCII character -> A = 0-9, carry clear; else carry set
+digit:  sec
+        sbc #'0'
+        cmp #10
+        rts                     ; (carry set when A >= 10, i.e. not a digit)
+
+; ping: send PING, wait for its echo. Carry set if none came in two seconds.
+ping:   lda #T_PING
+        ldy #0
+        jsr send
+        lda RTCLOK
+        clc
+        adc #120
+        sta cnt
+@wait:  lda pkt_ready
+        bne @got
+        jsr cancel
+        lda RTCLOK
+        cmp cnt
+        bne @wait
+        sec
+        rts
+@got:   jsr getpkt
+        cmp #T_PING
+        bne @wait               ; (a repeated HELLO, say)
+        clc
+        rts
+
+; measure: time eight round trips and set the input delay from them.
+;   In lockstep each side can run at most `delay` ticks per round trip, so
+;   full speed needs delay >= round trip (in frames); we add a quarter and one.
+measure:
+        lda #<m_timing
+        ldx #>m_timing
+        jsr print
+        jsr ping                ; one to settle
+        bcc :+
+        jmp @fail
+:       lda RTCLOK
+        sta t0
+        lda #8
+        sta pings
+@trip:  jsr ping
+        bcc :+
+        jmp @fail
+:       dec pings
+        bne @trip
+        lda RTCLOK
+        sec
+        sbc t0                  ; E = frames for 8 round trips
+        sta t0
+        sta cnt
+        lda #0
+        sta cnt+1
+        asl cnt                 ; E * 4
+        rol cnt+1
+        asl cnt
+        rol cnt+1
+        lda t0
+        clc
+        adc cnt                 ; + E  -> E * 5
+        sta cnt
+        bcc :+
+        inc cnt+1
+:       lda cnt
+        clc
+        adc #31                 ; round up
+        sta cnt
+        bcc :+
+        inc cnt+1
+:       ldx #5                  ; / 32  (= * 1.25 / 8)
+:       lsr cnt+1
+        ror cnt
+        dex
+        bne :-
+        ldx cnt
+        inx                     ; + 1
+        cpx #DELAY_MIN
+        bcs :+
+        ldx #DELAY_MIN
+:       cpx #DELAY_MAX+1
+        bcc :+
+        ldx #DELAY_MAX
+:       stx cfg_delay
+        lda #<m_rt
+        ldx #>m_rt
+        jsr print
+        lda t0                  ; E frames / 8 trips * 16.7 ms ~ E * 2 ms
+        cmp #125
+        bcc :+
+        lda #125
+:       asl a
+        jsr decimal
+        lda #<m_ms
+        ldx #>m_ms
+        jsr print
+        lda cfg_delay
+        jsr decimal
+        lda #EOL
+        jmp putc
+@fail:  lda #DELAY_DEF
+        sta cfg_delay
+        lda #<m_notimed
+        ldx #>m_notimed
+        jmp print
 
 ; getpkt: wait for a valid packet, return its type in A. START key cancels.
 getpkt: lda pkt_ready
@@ -621,6 +761,9 @@ pause:  lda #<m_pause
         rts
 
 welcomed:   .byte 0
+delay_set:  .byte 0             ; the host typed a delay
+t0:         .byte 0
+pings:      .byte 0
 
 m_banner:   .byte "BALLBLAZER NETPLAY", EOL, 0
 m_bad:      .byte "THIS IS NOT THE GAME IMAGE THE NETPLAY", EOL
@@ -633,7 +776,12 @@ m_noip:     .byte "THIS FUJINET DOES NOT KNOW ITS OWN", EOL
 m_askip:    .byte "OPPONENT'S ADDRESS", EOL
             .byte "(JUST RETURN = LOCAL GAME)", EOL, 0
 m_askrole:  .byte "H = HOST, TOP    J = JOIN, BOTTOM", EOL, 0
-m_askdelay: .byte "INPUT DELAY, 3-9 FRAMES (RETURN = 5)", EOL, 0
+m_askdelay: .byte "INPUT DELAY IN FRAMES, 3-20", EOL
+            .byte "(JUST RETURN = MEASURE THE LINK)", EOL, 0
+m_timing:   .byte "TIMING THE LINK...", EOL, 0
+m_rt:       .byte "ROUND TRIP ABOUT (MS):", EOL, 0
+m_ms:       .byte EOL, "INPUT DELAY SET TO (FRAMES):", EOL, 0
+m_notimed:  .byte "COULD NOT TIME THE LINK. DELAY 9.", EOL, 0
 m_nostream: .byte "FUJINET REFUSED NETSTREAM MODE.", EOL, 0
 m_wait:     .byte "WAITING FOR OPPONENT. START = GIVE UP", EOL, 0
 m_differ:   .byte "OPPONENT HAS A DIFFERENT VERSION.", EOL, 0

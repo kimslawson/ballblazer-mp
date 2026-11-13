@@ -68,9 +68,16 @@ only voices 3+4 are spare (the alternative costs a third sound voice). So the
 line is turned around like the OS does it, and the protocol guarantees nobody
 ever talks over the other.
 
-Receive and transmit are interrupt driven (`irq`). Sound: voices 1 and 2 play
-as before; the two effect voices that lived on 3 and 4 borrow voice 2 while
-they sound (`mix`).
+Receive and transmit are interrupt driven (`irq`).
+
+**Sound.** The game drives all four POKEY voices - on the title screen bass,
+percussion, lead and a quiet echo of the lead; in a match engines and effects
+- and two or more regularly sound at once. With voices 3+4 taken, `mix` plays
+the **two loudest** of the game's four voices each tick on POKEY voices 1 and
+2 (all four use the same clock, so any of them plays unchanged on either),
+keeping a voice on the channel it already had. Against the stock game that
+reproduces about 88 % of in-match ticks and 76 % of title-music ticks
+exactly; in the rest a third or fourth, quieter voice is dropped.
 
 ## Protocol
 
@@ -83,7 +90,7 @@ packet = hdr, 0-7 body bytes, checksum
 
 hdr    bit 7    sequence bit
        bit 5-3  body length
-       bit 2-0  type: 0 DATA, 1 START, 2 HELLO, 3 WELCOME
+       bit 2-0  type: 0 DATA, 1 START, 2 HELLO, 3 WELCOME, 4 PING
 
 DATA body byte:  bits 0-4 input code, bits 5-7 (repeat - 1)
                  one byte = up to 8 consecutive ticks of an unchanged controller
@@ -101,8 +108,10 @@ A typical packet is three bytes (12.5 ms on the wire).
 
 - **Host** sends DATA with sequence bit *s* and waits. A valid answer carrying
   the same *s* acknowledges it: the host unpacks the client's inputs, flips
-  *s*, and sends the next packet at once. If nothing valid arrives for 8
-  frames it resends the identical packet.
+  *s*, and sends the next packet at once. If nothing valid arrives for 30
+  frames (half a second - far above any sane round trip, so that a slow link
+  never makes the two ends talk over each other) it resends the identical
+  packet.
 - **Client** answers every DATA. A packet whose sequence bit differs from the
   last one it took is new: unpack, build the answer, send. One with the same
   bit means the answer was lost: resend the identical answer.
@@ -112,8 +121,11 @@ A typical packet is three bytes (12.5 ms on the wire).
   packet is arriving.
 
 Handshake (lobby): the client sends `HELLO(version, image checksum)` every
-⅔ s; the host answers `WELCOME(seed lo, seed hi, delay)`; the client answers
-`START` and starts its game; the host starts on `START`. A client that has not
+⅔ s. Unless a delay was typed in, the host then **times the link**: nine
+`PING`s, each echoed by the client, the last eight timed with the OS frame
+counter; the input delay becomes a quarter more than one round trip, plus one
+frame (3-20). The host answers `WELCOME(seed lo, seed hi, delay)`; the client
+answers `START` and starts its game; the host starts on `START`. A client that has not
 yet seen DATA repeats `START` every 32 frames, so a lost `START` is harmless.
 
 `tools/npproto.py` is the same protocol in Python (used by the tests and by

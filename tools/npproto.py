@@ -7,15 +7,16 @@ tools/vpeer.py (a PC stand-in for the second Atari).
 Packet:  [hdr] [0-7 body bytes] [checksum]
   hdr   bit 7   sequence bit
         bit 5-3 body length
-        bit 2-0 type (0 DATA, 1 START, 2 HELLO, 3 WELCOME)
+        bit 2-0 type (0 DATA, 1 START, 2 HELLO, 3 WELCOME, 4 PING)
   DATA body byte: bits 0-4 input code, bits 5-7 = repeat count - 1
   input code: bits 0-3 joystick nibble (PORTA style, 0 = pushed) or a key
               (1 START, 2 SELECT, 3 OPTION, 4 SPACE, 8 ESC, 12 RETURN);
               bit 4 = trigger pressed
 """
-T_DATA, T_START, T_HELLO, T_WELCOME = 0, 1, 2, 3
+T_DATA, T_START, T_HELLO, T_WELCOME, T_PING = 0, 1, 2, 3, 4
 NEUTRAL = 0x0F
-VERSION = 1
+VERSION = 2
+DELAY_MIN, DELAY_MAX, DELAY_DEFAULT = 3, 20, 9
 GAME_SUM = 0xA4A5
 PORT = 6502
 
@@ -32,6 +33,13 @@ def code(stick="", trig=False, key=None):
     for c in stick.upper():
         v &= ~_DIR[c]
     return v | (0x10 if trig else 0)
+
+
+def delay_for(frames_for_8_round_trips):
+    """The input delay the lobby derives from eight timed round trips:
+    a quarter more than one round trip, plus one frame (resident.s `measure`)."""
+    d = (frames_for_8_round_trips * 5 + 31) // 32 + 1
+    return max(DELAY_MIN, min(DELAY_MAX, d))
 
 
 def csum(data):

@@ -16,7 +16,7 @@ Two-machine Ballblazer over FujiNet. Legend: `[x]` done and verified ·
       half duplex, stop-and-wait (`docs/01`, `docs/02`, `docs/05`). The earlier
       state-overwrite design over the `N:` device was dropped: SIO cannot run
       while this game's display interrupts hold the CPU.
-- [x] **Resident netplay code** (`src/netplay/resident.s`, 922 of 1024 bytes):
+- [x] **Resident netplay code** (`src/netplay/resident.s`, 1001 of 1024 bytes):
       tick gate, input virtualisation, seeded PRNG, per-tick facing latch,
       interrupt-driven serial driver, protocol, sound mixing.
 - [x] **Lobby** (`src/netplay/lobby.s`): image check, own address, opponent
@@ -28,6 +28,13 @@ Two-machine Ballblazer over FujiNet. Legend: `[x]` done and verified ·
 - [x] **Serial driver and lobby proven in emulation** (`make npserial`): the
       production code against a cassette image playing the remote machine,
       both roles, no packet lost.
+
+- [x] **First network play** between two FujiNet-PC based emulators on a LAN
+      (iPad + iPhone): connects and plays. It stuttered (round trip ~130 ms
+      against a fixed delay of 5 and an 8-frame resend timeout) and sounded
+      thin; both addressed since - the lobby now times the link and picks
+      the delay, the timeout is 30 frames, and the mix plays the two loudest
+      of the game's four voices.
 
 ## Next — on hardware
 

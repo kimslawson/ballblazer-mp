@@ -54,8 +54,10 @@ the emulator tests run there too (see the end of this document).
    device's network settings instead.)
 3. Type the **opponent's** address and RETURN. (Just RETURN = the ordinary
    local game, completely unpatched.)
-4. One player answers **H** (host, player 1, top view) and picks an input
-   delay — RETURN for 5. The other answers **J** (join, player 2, bottom).
+4. One player answers **H** (host, player 1, top view). At the delay prompt
+   just press RETURN: the lobby times the link and picks the input delay
+   (or type a number, 3-20). The other answers **J** (join, player 2,
+   bottom).
 5. `WAITING FOR OPPONENT` — when the handshake completes both machines start
    the game together. START on either machine begins a match; SELECT/OPTION
    and the host's stick set the options as usual. Each player uses the
@@ -65,10 +67,14 @@ START during `WAITING` gives up and starts a local game.
 
 ### What to expect
 
-- Steering answers `delay` frames late (83 ms at the default). Raise the
-  delay if the picture stutters; lower it if it feels sluggish and does not.
-- Sound: the two music/engine voices are there; the two effect voices share
-  the second one while they sound. Voices 3 and 4 are the serial clock.
+- Steering answers `delay` frames late. The lobby shows the round trip it
+  measured and the delay it chose; if play still stutters, host again and
+  type a larger number, and if it feels sluggish and smooth, a smaller one.
+  Emulators with a built-in FujiNet need roughly twice the delay real
+  hardware should (see `docs/05-timing.md`).
+- Sound: POKEY voices 3 and 4 are the serial clock, so each tick the two
+  loudest of the game's four voices are played. Most of the time that is
+  everything; in busy passages the quietest parts drop out.
 - If the link drops, both games freeze. Power-cycle to start over. Do not use
   System Reset once the game is running.
 
@@ -136,7 +142,8 @@ the link is sound.
 | `WAITING FOR OPPONENT` forever | addresses swapped or mistyped; both chose the same role; firmware NetStream without baud selection (it then talks 19200 to our 2400); UDP 6502 blocked |
 | `THIS IS NOT THE GAME IMAGE…` | a different dump; only the one in `rom/README.md` is supported |
 | `OPPONENT HAS A DIFFERENT VERSION` (host) | the two disks were built from different images or revisions of this code |
-| game starts, then freezes or crawls | packets are being lost: vpeer's `resent` counter will show it; try a larger delay, check Wi-Fi |
+| play stutters evenly, music drags | the input delay is below the link's round trip: let the host time the link (RETURN at the delay prompt) or type a larger delay. `vpeer.py` shows the round trip |
+| game starts, then freezes for half a second at a time | packets are being lost: vpeer's `resent` counter will show it; check Wi-Fi |
 | the two screens show different games | a desync — should not happen; please note what was going on and report it |
 
 ## Running the emulator tests yourself

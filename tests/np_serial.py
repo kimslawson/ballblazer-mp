@@ -16,6 +16,8 @@ FujiNet SIO commands are stubbed out (NOFUJI build).
 
     np_serial.py client     the tape plays the host   (default)
     np_serial.py host       the tape plays the client
+    np_serial.py host-auto  ... and the host times the link itself (RETURN at
+                            the delay prompt) instead of being told a delay
     np_serial.py client --watch
                             ... then replay the session in a normal emulator
                             window at real speed, with sound (about 2 minutes:
@@ -46,7 +48,10 @@ def chunk(kind, data=b"", aux=0):
     return kind + struct.pack("<HH", len(data), aux) + data
 
 
-def make_tape(path, tape_is_host):
+PING_MS = 80             # host-auto: the tape answers a ping every 80 ms
+
+
+def make_tape(path, tape_is_host, pings=False, delay=DELAY):
     """The remote side's transmissions as a cassette image. Returns the number
     of ticks of input it carries."""
     byte_ms = 10000.0 / BAUD
@@ -59,10 +64,16 @@ def make_tape(path, tape_is_host):
         hello = P.packet(P.T_HELLO, bytes([P.VERSION, P.GAME_SUM & 255,
                                            P.GAME_SUM >> 8]))
         t += chunk(b"data", hello, 1500)
-        t += chunk(b"data", hello, 1500)
+        if pings:                # 1 to settle + 8 timed echoes
+            ping = P.packet(P.T_PING)
+            t += chunk(b"data", ping, 400)
+            for _ in range(8):
+                t += chunk(b"data", ping, int(PING_MS - len(ping) * byte_ms))
+        else:
+            t += chunk(b"data", hello, 1500)
         t += chunk(b"data", P.packet(P.T_START), 1500)
         t += chunk(b"data", P.packet(P.T_START), 800)
-    ep = P.Endpoint(host=tape_is_host, delay=DELAY)
+    ep = P.Endpoint(host=tape_is_host, delay=delay)
     if not tape_is_host:
         ep.seq = 0x00            # a client echoes the host's seq: 0, 1, 0 ...
     gap = 6000                   # the Atari is busy starting the game
@@ -91,7 +102,10 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     watch = "--watch" in sys.argv
     role = args[0] if args else "client"
-    assert role in ("host", "client")
+    assert role in ("host", "client", "host-auto")
+    auto = role == "host-auto"
+    # eight 80 ms round trips = 38.4 frames; the lobby may count 38 or 39
+    delays = sorted({P.delay_for(38), P.delay_for(39)}) if auto else [DELAY]
 
     def sh(*a):
         subprocess.run(a, cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
@@ -105,7 +119,8 @@ def main():
        "build/np/serial.atr")
     L = labels(os.path.join(ROOT, "build/np/np2.lbl"))
     cas = os.path.join(ROOT, "build/np/serial-%s.cas" % role)
-    total = make_tape(cas, tape_is_host=(role == "client"))
+    total = make_tape(cas, tape_is_host=(role == "client"), pings=auto,
+                      delay=delays[0])
 
     disk = os.path.join(ROOT, "build/np/serial.atr")
     extra = ["-nopatch", "-tape", cas, "-tape-readonly"]
@@ -114,19 +129,18 @@ def main():
         r.step(1700)                       # boot at real disk speed
         r.type("10.0.0.2\n")               # opponent's address
         r.step(30)
-        if role == "host":
+        if role != "client":
             r.type("H\n")
             r.step(30)
-            r.type("%d\n" % DELAY)         # input delay
+            r.type("\n" if auto else "%d\n" % DELAY)   # input delay
         else:
             r.type("J\n")
         r.shot(os.path.join(ROOT, "build/shots/serial_lobby_%s.png" % role))
         # the START key belongs to the lobby until the game runs
         st = {}
-        want = (DELAY + total) & 0xFF
         moves = ["U", "UL", "U", "UR", "U", "L", "U", "R"]
         for n in range(60):
-            if role == "host" and n == 8:
+            if role != "client" and n == 8:
                 r.step(8, start=True)      # the host starts the match
             if n >= 10:                    # this Atari's player flies about
                 r.set(joy0=moves[n % len(moves)], trig0=(n % 5 == 0))
@@ -136,14 +150,16 @@ def main():
                   ("tick", "r_wr", "l_wr", "l_base", "got_data", "err_cnt",
                    "net_mode", "tx_busy")}
             print("%s" % st, flush=True)
-            if n > 20 and st["r_wr"] == want and st["tick"] == want:
+            if n > 20 and st["tick"] == st["r_wr"] and \
+                    st["r_wr"] in [(d + total) & 0xFF for d in delays]:
                 break
         r.shot(os.path.join(ROOT, "build/shots/serial_%s.png" % role))
         cfg = r.dump(0xBC00, 0xBC04)
 
+    want = (cfg[1] + total) & 0xFF
     ok = (st["err_cnt"] == 0 and st["r_wr"] == want and st["tick"] == want
-          and st["net_mode"] == 1 and cfg[1] == DELAY
-          and cfg[0] == (0x00 if role == "host" else 0x80))
+          and st["net_mode"] == 1 and cfg[1] in delays
+          and cfg[0] == (0x80 if role == "client" else 0x00))
     print("role %s: the tape sent %d ticks in %d packets; this Atari has "
           "r_wr=%d (want %d), tick=%d, damaged=%d, delay=%d"
           % (role, total, PACKETS, st["r_wr"], want, st["tick"],

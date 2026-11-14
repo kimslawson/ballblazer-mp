@@ -35,6 +35,9 @@ done
 step "link protocol reference (lossless + 30% loss, wire format)"
 python3 tools/vpeer.py selftest || fail=1
 
+step "input delay rule: stall-free needs 1.5 round trips; the lobby's choice"
+python3 tests/np_delay.py | tail -1 | grep -q PASS && echo "PASS" || fail=1
+
 step "disk builder rejects an unknown image"
 head -c 4096 /dev/zero > build/np/not-the-game.atr
 if python3 tools/mkdisk.py build/np/not-the-game.atr build/np/np0 build/np/x.atr \

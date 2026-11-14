@@ -49,7 +49,7 @@
         .include "hw.inc"
         .include "game.inc"
 
-        .export cfg_role, cfg_delay, cfg_baud, rnd0, rnd1
+        .export cfg_role, cfg_delay, cfg_baud, rnd0, rnd1, cfg_to
         .export hook, idle, irq, prng, mix, dli_a, dli_b
         .export v_porta, v_trig0, v_trig1, v_consol, v_kbcode, v_irqst, sink
         .export net_mode, pkt_ready, txbuf, rxbuf, finish_pkt, tx_start, tx_busy
@@ -75,9 +75,10 @@ T_O       = 100                 ; host retransmit timeout, frames
 TEST_STOP_EN = $0AF0            ; (a page the game clears and never uses)
 TEST_STOP    = $0AF1
 .else
-T_O       = 30                  ; 0.5 s. Well above any sane round trip: a
-                                ;   timeout near the round-trip time makes host
-                                ;   and client talk over each other
+T_O       = 30                  ; 0.5 s, unless the lobby timed the link
+                                ;   (then 3 round trips). A timeout near the
+                                ;   round trip makes host and client talk
+                                ;   over each other
 .endif
 
         .segment "RESIDENT"
@@ -88,6 +89,7 @@ cfg_delay:  .byte 5             ; input delay in ticks
 cfg_baud:   .byte 109           ; AUDF3 for 2400 baud (109 NTSC / 106 PAL)
 rnd0:       .byte $C3           ; shared random seed
 rnd1:       .byte $5A
+cfg_to:     .byte T_O           ; host retransmit timeout, frames
 
 ; ---------------------------------------------------------------------------
 ; idle - the game's main loop jumps here instead of straight back to its top.
@@ -149,7 +151,7 @@ hook:   lda in_irq              ; did the VBI land inside our IRQ handler?
         bmi @client
         inc since_rx            ; host: nothing heard for a while -> (re)send
         lda since_rx
-        cmp #T_O
+        cmp cfg_to
         bcc @busy
         lda tx_busy             ; never talk over our own transmission ...
         ora rx_n                ; ... or a packet that is still arriving

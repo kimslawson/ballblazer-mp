@@ -30,11 +30,12 @@ Two-machine Ballblazer over FujiNet. Legend: `[x]` done and verified ·
       both roles, no packet lost.
 
 - [x] **First network play** between two FujiNet-PC based emulators on a LAN
-      (iPad + iPhone): connects and plays. It stuttered (round trip ~130 ms
-      against a fixed delay of 5 and an 8-frame resend timeout) and sounded
-      thin; both addressed since - the lobby now times the link and picks
-      the delay, the timeout is 30 frames, and the mix plays the two loudest
-      of the game's four voices.
+      (iPad + iPhone): connects and plays. It stuttered and sounded thin.
+      Since then: the lobby times the link and sets the delay to 1.5 worst
+      round trips + 1 (what turn-taking needs; a first attempt at 1.25
+      average round trips still stuttered), the resend timeout follows the
+      measurement, and the mix plays the two loudest of the game's four
+      voices. Smooth now costs 9-12 frames of delay on those emulators.
 
 ## Next — on hardware
 
@@ -54,8 +55,14 @@ Two-machine Ballblazer over FujiNet. Legend: `[x]` done and verified ·
       back to the lobby without a power cycle.
 - [ ] A desync detector (a few bytes of state hash in the packet header's
       spare bit) — cheap insurance, not needed by any test so far.
-- [ ] Full-duplex link (transmit clock on voice 2): halves the round trip and
-      allows a delay of 3, at the cost of a second sound voice.
+- [ ] **Less delay: a link that does not take turns.** Sending fresh inputs
+      in both directions every frame or two, each packet repeating the last
+      few ticks, needs a delay of about half a round trip + 2 instead of 1.5
+      round trips + 1, and a lost packet costs nothing. It needs POKEY to
+      send while it listens: in emulators that should simply work; on real
+      hardware it needs FujiNet's external serial clock (which would also
+      free all four sound voices) or the transmit clock on voice 2.
+- [ ] Recover from a damaged packet at once instead of after the timeout.
 - [ ] A relay (`REGISTER` mode) for play across the internet without port
       forwarding.
 - [ ] Support the "[a]" dump, if someone has it: check whether its byte at

@@ -72,8 +72,10 @@ host/join question with just RETURN, or press START while the lobby says
 ### What to expect
 
 - Steering answers `delay` frames late. The lobby shows the round trip it
-  measured and the delay it chose; if play still stutters, host again and
-  type a larger number, and if it feels sluggish and smooth, a smaller one.
+  measured (average and worst, in frames) and the delay it chose, which is
+  one and a half times the worst plus one - what a turn-taking link needs
+  to run without stopping. If play still stutters, host again and type a
+  larger number; if it is smooth and you want it snappier, a smaller one.
   Emulators with a built-in FujiNet need roughly twice the delay real
   hardware should (see `docs/05-timing.md`).
 - Sound: POKEY voices 3 and 4 are the serial clock, so each tick the two
@@ -146,8 +148,8 @@ the link is sound.
 | `WAITING FOR OPPONENT` forever | addresses swapped or mistyped (START goes back to the address prompt); both chose the same role; firmware NetStream without baud selection (it then talks 19200 to our 2400); UDP 6502 blocked |
 | `THIS IS NOT THE GAME IMAGE…` | a different dump; only the one in `rom/README.md` is supported |
 | `OPPONENT HAS A DIFFERENT VERSION` (host) | the two disks were built from different images or revisions of this code |
-| play stutters evenly, music drags | the input delay is below the link's round trip: let the host time the link (RETURN at the delay prompt) or type a larger delay. `vpeer.py` shows the round trip |
-| game starts, then freezes for half a second at a time | packets are being lost: vpeer's `resent` counter will show it; check Wi-Fi |
+| play stutters evenly, music drags | the input delay is below one and a half round trips: let the host time the link (RETURN at the delay prompt) or type a larger delay. `vpeer.py` shows the round trip |
+| game starts, then freezes for a moment now and then | packets are being lost or damaged: vpeer's `resent` counter will show it; check Wi-Fi, and on a real FujiNet try a larger NetStream `rx_depth` (see `docs/05-timing.md`) |
 | the two screens show different games | a desync — should not happen; please note what was going on and report it |
 
 ## Running the emulator tests yourself

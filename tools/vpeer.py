@@ -20,10 +20,12 @@ While the game runs vpeer prints, every two seconds: the tick it has reached
 and how many ticks per second it managed (60 = full speed), how much of the
 time it stood still waiting for the Atari's inputs, the round-trip time of the
 link, and how often it had to resend. That is the place to look when play
-stutters: a round trip longer than the input delay means the delay is too
-small; resends mean packets are being lost.
+stutters: the link takes turns, so smooth play needs an input delay of 1.5
+round trips (npproto.delay_for); less means stop-and-go. Resends mean packets
+are being lost.
 """
 import argparse
+import math
 import random
 import socket
 import sys
@@ -32,7 +34,7 @@ import time
 import npproto as P
 
 TICK = 1 / 59.92          # NTSC frame
-T_O = 30 * TICK           # host retransmit timeout (as on the Atari)
+T_O = P.T_O_DEFAULT * TICK  # host retransmit timeout (as on the Atari)
 BEACON = 32 * TICK        # client START / HELLO repeat
 
 
@@ -104,7 +106,7 @@ def run(args):
     def ping(timeout=2.0):
         """Round-trip time in seconds, or None."""
         t = time.time()
-        send(P.packet(P.T_PING))
+        send(P.packet(P.T_PING, P.PING_BODY))
         while time.time() - t < timeout:
             p = recv()
             if p and p[0] & 7 == P.T_PING:
@@ -112,6 +114,7 @@ def run(args):
         return None
 
     # ---- lobby ------------------------------------------------------------
+    timeout = T_O
     last = 0.0
     welcomed = False
     while True:
@@ -132,24 +135,26 @@ def run(args):
                 continue
             if not welcomed and delay is None:
                 ping()                                  # one to settle
-                trips = [ping() for _ in range(8)]
+                trips = [ping() for _ in range(P.PINGS)]
                 if None in trips:
                     delay = P.DELAY_DEFAULT
                     print("vpeer: could not time the link; delay %d" % delay)
                 else:
-                    frames8 = int(round(sum(trips) / TICK))
-                    delay = P.delay_for(frames8)
-                    print("vpeer: round trip %.0f ms (min %.0f, max %.0f) -> "
-                          "delay %d frames" % (1000 * sum(trips) / 8,
-                                               1000 * min(trips),
-                                               1000 * max(trips), delay))
+                    worst = math.ceil(max(trips) / TICK)
+                    delay = P.delay_for(worst)
+                    timeout = P.timeout_for(worst) * TICK
+                    print("vpeer: round trip %.0f ms (min %.0f, max %.0f = %d "
+                          "frames) -> delay %d frames"
+                          % (1000 * sum(trips) / len(trips),
+                             1000 * min(trips), 1000 * max(trips), worst,
+                             delay))
             send(P.packet(P.T_WELCOME, bytes([seed & 255 | 1, seed >> 8, delay])))
             welcomed = True
             print("vpeer: HELLO from %s - WELCOME sent (delay %d)" % (peer[0], delay))
         elif host and kind == P.T_START and welcomed:
             break
         elif not host and kind == P.T_PING:
-            send(P.packet(P.T_PING))                    # the host is timing us
+            send(P.packet(P.T_PING, P.PING_BODY))       # the host is timing us
             last = time.time() + 1.5                    # ... keep quiet meanwhile
         elif not host and kind == P.T_WELCOME:
             delay = got[3]
@@ -173,7 +178,7 @@ def run(args):
                 t0 += TICK          # stalled: this frame of wall time is lost
                 st["stall"] += TICK
                 break
-        if host and now - heard > T_O:
+        if host and now - heard > timeout:
             first = ep.tx is None
             send(ep.kick())
             st["tx"] += 1

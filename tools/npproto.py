@@ -15,7 +15,7 @@ Packet:  [hdr] [0-7 body bytes] [checksum]
 """
 T_DATA, T_START, T_HELLO, T_WELCOME, T_PING = 0, 1, 2, 3, 4
 NEUTRAL = 0x0F
-VERSION = 2
+VERSION = 3
 DELAY_MIN, DELAY_MAX, DELAY_DEFAULT = 3, 20, 9
 GAME_SUM = 0xA4A5
 PORT = 6502
@@ -35,11 +35,28 @@ def code(stick="", trig=False, key=None):
     return v | (0x10 if trig else 0)
 
 
-def delay_for(frames_for_8_round_trips):
-    """The input delay the lobby derives from eight timed round trips:
-    a quarter more than one round trip, plus one frame (resident.s `measure`)."""
-    d = (frames_for_8_round_trips * 5 + 31) // 32 + 1
-    return max(DELAY_MIN, min(DELAY_MAX, d))
+PINGS = 16                 # round trips the lobby times
+PING_BODY = bytes(2)       # a PING is the size of a typical DATA packet
+T_O_DEFAULT, T_O_MIN = 30, 12
+
+
+def delay_for(worst):
+    """The input delay the lobby derives from the slowest of the round trips
+    it timed, in frames (lobby.s `measure`).
+
+    The link takes turns: each side hears from the other once per round trip
+    RT, and what it hears was sampled RT/2 earlier. A packet built at time t
+    carries inputs up to tick(t) + delay and must last until the next one
+    arrives; for the host that is at t + 2 RT - RT/2, for the client the same
+    by symmetry, so stall-free play needs delay >= 1.5 RT. Below that the
+    game runs at 2/3 * delay / RT of full speed."""
+    worst = min(worst, DELAY_MAX)
+    return max(DELAY_MIN, min(DELAY_MAX, worst + (worst + 1) // 2 + 1))
+
+
+def timeout_for(worst):
+    """Host resend timeout in frames: three worst round trips of silence."""
+    return max(T_O_MIN, min(T_O_DEFAULT, 3 * min(worst, DELAY_MAX)))
 
 
 def csum(data):

@@ -21,7 +21,7 @@
         .include "hw.inc"
         .include "game.inc"
 
-        .import cfg_role, cfg_delay, cfg_baud, rnd0, rnd1
+        .import cfg_role, cfg_delay, cfg_baud, rnd0, rnd1, cfg_to
         .import hook, idle, irq, prng, mix, dli_a, dli_b
         .import v_porta, v_trig0, v_trig1, v_consol, v_kbcode, v_irqst, sink
         .import net_mode, pkt_ready, txbuf, rxbuf, finish_pkt, tx_start, tx_busy
@@ -37,12 +37,16 @@ TEST = 0
 NOFUJI = 0                      ; 1 = serial-driver test build: the two FujiNet
 .endif                          ;     commands are skipped (as if they succeeded)
 
-VERSION   = 2                   ; protocol version (HELLO)
+VERSION   = 3                   ; protocol version (HELLO)
 PORT      = 6502                ; UDP port, both ends
 T_START   = 1
 T_HELLO   = 2
 T_WELCOME = 3
 T_PING    = 4                   ; lobby only: echoed back, to time the link
+PING_HDR  = T_PING | (2 << 3)   ;   (the size of a typical DATA packet)
+PINGS     = 16                  ; round trips timed
+T_O_DEF   = 30                  ; resend timeout when the link was not timed
+T_O_MIN   = 12
 DELAY_MIN = 3
 DELAY_MAX = 20
 DELAY_DEF = 9                   ; if the link cannot be timed
@@ -126,6 +130,8 @@ askip:  ldx sp0
         lda #0
         sta welcomed
         sta delay_set
+        lda #T_O_DEF
+        sta cfg_to
         lda #<m_askip
         ldx #>m_askip
         jsr print
@@ -307,8 +313,8 @@ client: lda #VERSION
 @got:   jsr getpkt
         cmp #T_PING
         bne :+
-        lda #T_PING             ; the host is timing the link: echo, and
-        ldy #0                  ;   keep quiet a while longer
+        lda #PING_HDR           ; the host is timing the link: echo, and
+        ldy #2                  ;   keep quiet a while longer
         jsr send
         lda RTCLOK
         clc
@@ -486,8 +492,8 @@ digit:  sec
         rts                     ; (carry set when A >= 10, i.e. not a digit)
 
 ; ping: send PING, wait for its echo. Carry set if none came in two seconds.
-ping:   lda #T_PING
-        ldy #0
+ping:   lda #PING_HDR
+        ldy #2
         jsr send
         lda RTCLOK
         clc
@@ -507,9 +513,15 @@ ping:   lda #T_PING
         clc
         rts
 
-; measure: time eight round trips and set the input delay from them.
-;   In lockstep each side can run at most `delay` ticks per round trip, so
-;   full speed needs delay >= round trip (in frames); we add a quarter and one.
+; measure: time sixteen round trips one by one; set the input delay and the
+; resend timeout from the SLOWEST of them.
+;   The link is strict turn-taking, so each side hears from the other once
+;   per round trip, and what it hears was sampled half a round trip earlier.
+;   A tick therefore only always finds its inputs waiting if
+;       delay >= 1.5 * round trip
+;   (tools/npproto.py has the sum; tests/np_delay.py checks it). Below that
+;   the game still runs, at 2/3 * delay / round-trip of full speed, in a
+;   stop-and-go rhythm. We take 1.5 * worst, rounded up, plus one frame.
 measure:
         lda #<m_timing
         ldx #>m_timing
@@ -517,60 +529,72 @@ measure:
         jsr ping                ; one to settle
         bcc :+
         jmp @fail
-:       lda RTCLOK
-        sta t0
-        lda #8
+:       lda #0
+        sta rmax
+        sta rsum
+        sta rsum+1
+        lda #PINGS
         sta pings
-@trip:  jsr ping
+@trip:  lda RTCLOK
+        sta t0
+        jsr ping
         bcc :+
         jmp @fail
+:       lda RTCLOK
+        sec
+        sbc t0                  ; this round trip, in frames
+        cmp rmax
+        bcc :+
+        sta rmax
+:       clc
+        adc rsum
+        sta rsum
+        bcc :+
+        inc rsum+1
 :       dec pings
         bne @trip
-        lda RTCLOK
-        sec
-        sbc t0                  ; E = frames for 8 round trips
-        sta t0
-        sta cnt
-        lda #0
-        sta cnt+1
-        asl cnt                 ; E * 4
-        rol cnt+1
-        asl cnt
-        rol cnt+1
-        lda t0
-        clc
-        adc cnt                 ; + E  -> E * 5
-        sta cnt
+
+        lda rmax                ; delay = worst + ceil(worst / 2) + 1
+        cmp #DELAY_MAX
         bcc :+
-        inc cnt+1
-:       lda cnt
+        lda #DELAY_MAX          ; (keeps the sums below in 8 bits)
+:       sta t0
         clc
-        adc #31                 ; round up
-        sta cnt
-        bcc :+
-        inc cnt+1
-:       ldx #5                  ; / 32  (= * 1.25 / 8)
-:       lsr cnt+1
-        ror cnt
-        dex
-        bne :-
-        ldx cnt
-        inx                     ; + 1
-        cpx #DELAY_MIN
+        adc #1
+        lsr a
+        sec                     ; the + 1
+        adc t0
+        cmp #DELAY_MIN
         bcs :+
-        ldx #DELAY_MIN
-:       cpx #DELAY_MAX+1
+        lda #DELAY_MIN
+:       cmp #DELAY_MAX+1
         bcc :+
-        ldx #DELAY_MAX
-:       stx cfg_delay
+        lda #DELAY_MAX
+:       sta cfg_delay
+        lda t0                  ; resend after 3 worst round trips of silence
+        asl a
+        adc t0
+        cmp #T_O_MIN
+        bcs :+
+        lda #T_O_MIN
+:       cmp #T_O_DEF
+        bcc :+
+        lda #T_O_DEF
+:       sta cfg_to
+
         lda #<m_rt
         ldx #>m_rt
         jsr print
-        lda t0                  ; E frames / 8 trips * 16.7 ms ~ E * 2 ms
-        cmp #125
-        bcc :+
-        lda #125
-:       asl a
+        ldx #4                  ; average = sum / 16
+:       lsr rsum+1
+        ror rsum
+        dex
+        bne :-
+        lda rsum
+        jsr decimal
+        lda #' '
+        jsr putc
+        lda rmax
         jsr decimal
         lda #<m_ms
         ldx #>m_ms
@@ -578,7 +602,16 @@ measure:
         lda cfg_delay
         jsr decimal
         lda #EOL
-        jmp putc
+        jsr putc
+        lda RTCLOK              ; leave the numbers up for three seconds
+        clc
+        adc #180
+        sta cnt
+:       jsr cancel
+        lda RTCLOK
+        cmp cnt
+        bne :-
+        rts
 @fail:  lda #DELAY_DEF
         sta cfg_delay
         lda #<m_notimed
@@ -787,6 +820,8 @@ welcomed:   .byte 0
 delay_set:  .byte 0             ; the host typed a delay
 t0:         .byte 0
 pings:      .byte 0
+rmax:       .byte 0             ; slowest round trip, frames
+rsum:       .word 0             ; all of them added up
 
 m_banner:   .byte "BALLBLAZER NETPLAY", EOL, 0
 m_bad:      .byte "THIS IS NOT THE GAME IMAGE THE NETPLAY", EOL
@@ -803,7 +838,7 @@ m_askrole:  .byte "H = HOST, TOP    J = JOIN, BOTTOM", EOL
 m_askdelay: .byte "INPUT DELAY IN FRAMES, 3-20", EOL
             .byte "(JUST RETURN = MEASURE THE LINK)", EOL, 0
 m_timing:   .byte "TIMING THE LINK...", EOL, 0
-m_rt:       .byte "ROUND TRIP ABOUT (MS):", EOL, 0
+m_rt:       .byte "ROUND TRIP, FRAMES (AVERAGE, WORST):", EOL, 0
 m_ms:       .byte EOL, "INPUT DELAY SET TO (FRAMES):", EOL, 0
 m_notimed:  .byte "COULD NOT TIME THE LINK. DELAY 9.", EOL, 0
 m_nostream: .byte "FUJINET REFUSED NETSTREAM MODE.", EOL, 0

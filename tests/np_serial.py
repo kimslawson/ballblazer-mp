@@ -68,10 +68,10 @@ def make_tape(path, tape_is_host, pings=False, delay=DELAY):
         hello = P.packet(P.T_HELLO, bytes([P.VERSION, P.GAME_SUM & 255,
                                            P.GAME_SUM >> 8]))
         t += chunk(b"data", hello, 1500)
-        if pings:                # 1 to settle + 8 timed echoes
-            ping = P.packet(P.T_PING)
+        if pings:                # 1 to settle + the timed echoes
+            ping = P.packet(P.T_PING, P.PING_BODY)
             t += chunk(b"data", ping, 400)
-            for _ in range(8):
+            for _ in range(P.PINGS):
                 t += chunk(b"data", ping, int(PING_MS - len(ping) * byte_ms))
         else:
             t += chunk(b"data", hello, 1500)
@@ -108,8 +108,9 @@ def main():
     role = args[0] if args else "client"
     assert role in ("host", "client", "host-auto")
     auto = role == "host-auto"
-    # eight 80 ms round trips = 38.4 frames; the lobby may count 38 or 39
-    delays = sorted({P.delay_for(38), P.delay_for(39)}) if auto else [DELAY]
+    # an 80 ms round trip is 4.8 frames; counted in whole frames, the slowest
+    # of sixteen comes out as 5, perhaps 6
+    delays = sorted({P.delay_for(5), P.delay_for(6)}) if auto else [DELAY]
 
     def sh(*a):
         subprocess.run(a, cwd=ROOT, check=True, stdout=subprocess.DEVNULL)

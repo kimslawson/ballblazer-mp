@@ -59,6 +59,8 @@ cnt       = $CD
 
 start:
 .if TEST = 0
+        tsx                     ; askip can be re-entered from anywhere
+        stx sp0
         jsr imgsum
         cmp #G_SUM_LO
         bne @bad
@@ -97,7 +99,7 @@ start:
 @noip:  lda #<m_noip
         ldx #>m_noip
         jsr print
-        jmp @askip
+        jmp askip
 @myip:  lda #<m_myip
         ldx #>m_myip
         jsr print
@@ -116,8 +118,15 @@ start:
 :       lda #EOL
         jsr putc
 
-        ; ---- opponent address
-@askip: lda #<m_askip
+        ; ---- opponent address. Also the way out of every later step: a
+        ;      mistyped address must be fixable without an editing key (not
+        ;      every emulator keyboard has a working BACK SPACE)
+askip:  ldx sp0
+        txs
+        lda #0
+        sta welcomed
+        sta delay_set
+        lda #<m_askip
         ldx #>m_askip
         jsr print
         jsr input
@@ -127,7 +136,6 @@ start:
         jmp G_START             ; nothing typed: the stock game, untouched
 :
         ; ---- role
-@askrole:
         lda #<m_askrole
         ldx #>m_askrole
         jsr print
@@ -138,7 +146,7 @@ start:
         cmp #'J'
         beq @role
         cmp #'H'
-        bne @askrole
+        bne askip               ; anything else: type the address again
         ; ---- the host sets the input delay (it travels in WELCOME): a
         ;      number, or just RETURN to have the link timed
         lda #<m_askdelay
@@ -204,8 +212,7 @@ start:
         lda #<m_nostream
         ldx #>m_nostream
         jsr print
-        jsr pause
-        jmp G_START
+        jmp askip               ; perhaps the address was the problem
 :
         lda #<m_wait
         ldx #>m_wait
@@ -214,6 +221,10 @@ start:
         ; ---- bring the serial link up (lobby mode: packets are just flagged)
         sei
         jsr clear_state
+        lda VIMIRQ
+        sta oldirq
+        lda VIMIRQ+1
+        sta oldirq+1
         lda #<irq
         sta VIMIRQ
         lda #>irq
@@ -585,15 +596,25 @@ getpkt: lda pkt_ready
         and #$07
         rts
 
-; cancel: START pressed -> give up on the network, play locally
+; cancel: START pressed -> give the machine back to the OS and FujiNet back
+; to the SIO bus, and ask for the address again (RETURN there = local game)
 cancel: lda CONSOL
         and #1
-        bne :+
+        bne @no
         sei
-        lda #0
+        lda oldirq
+        sta VIMIRQ
+        lda oldirq+1
+        sta VIMIRQ+1
+        lda #$3C                ; motor line off: NetStream stops relaying
+        sta PACTL
+        lda #SK_RECV            ; (= the OS's own SKCTL value)
+        sta SKCTL
+        lda POKMSK
         sta IRQEN
-        jmp G_START
-:       rts
+        cli
+        jmp askip
+@no:    rts
 
 ; imgsum: 16-bit sum of $4000-$BBFF -> A (lo), X (hi)
 imgsum: lda #$00
@@ -760,6 +781,8 @@ pause:  lda #<m_pause
         beq :-
         rts
 
+sp0:        .byte 0             ; stack pointer on entry
+oldirq:     .word 0             ; the OS's IRQ handler
 welcomed:   .byte 0
 delay_set:  .byte 0             ; the host typed a delay
 t0:         .byte 0
@@ -775,7 +798,8 @@ m_noip:     .byte "THIS FUJINET DOES NOT KNOW ITS OWN", EOL
             .byte "SETTINGS OF THE DEVICE IT RUNS ON.", EOL, 0
 m_askip:    .byte "OPPONENT'S ADDRESS", EOL
             .byte "(JUST RETURN = LOCAL GAME)", EOL, 0
-m_askrole:  .byte "H = HOST, TOP    J = JOIN, BOTTOM", EOL, 0
+m_askrole:  .byte "H = HOST, TOP    J = JOIN, BOTTOM", EOL
+            .byte "(JUST RETURN = RETYPE THE ADDRESS)", EOL, 0
 m_askdelay: .byte "INPUT DELAY IN FRAMES, 3-20", EOL
             .byte "(JUST RETURN = MEASURE THE LINK)", EOL, 0
 m_timing:   .byte "TIMING THE LINK...", EOL, 0
@@ -783,7 +807,7 @@ m_rt:       .byte "ROUND TRIP ABOUT (MS):", EOL, 0
 m_ms:       .byte EOL, "INPUT DELAY SET TO (FRAMES):", EOL, 0
 m_notimed:  .byte "COULD NOT TIME THE LINK. DELAY 9.", EOL, 0
 m_nostream: .byte "FUJINET REFUSED NETSTREAM MODE.", EOL, 0
-m_wait:     .byte "WAITING FOR OPPONENT. START = GIVE UP", EOL, 0
+m_wait:     .byte "WAITING FOR OPPONENT. START = BACK", EOL, 0
 m_differ:   .byte "OPPONENT HAS A DIFFERENT VERSION.", EOL, 0
 m_pause:    .byte "PRESS START", EOL, 0
 

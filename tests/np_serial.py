@@ -23,7 +23,11 @@ FujiNet SIO commands are stubbed out (NOFUJI build).
                             window at real speed, with sound (about 2 minutes:
                             disk boot, lobby, handshake, a minute of play)
 
-Pass = every packet accepted, no damaged bytes, and the game is in a match.
+Every run first mistypes the opponent's address twice and takes both ways
+back to the prompt (RETURN at the role prompt; START while waiting).
+
+Pass = the last address typed is the one handed to FujiNet, every packet
+accepted, no damaged bytes, and the game is in a match.
 Needs rom/ballblazer.atr and the stock atari800.
 """
 import os
@@ -127,6 +131,16 @@ def main():
     rec = os.path.join(ROOT, "build/np/serial-%s.playback" % role)
     with Rig(disk, extra=extra, record=rec if watch else None) as r:
         r.step(1700)                       # boot at real disk speed
+        # A mistyped address has to be fixable without an editing key:
+        r.type("10.0.0.9\n")               # 1. wrong ...
+        r.step(30)
+        r.type("\n")                       #    ... RETURN at the role prompt
+        r.step(30)                         #    asks for the address again
+        r.type("10.0.0.3\n")               # 2. wrong again, and not noticed
+        r.step(30)                         #    until the lobby is waiting:
+        r.type("J\n")
+        r.step(8, start=True)              #    START goes back as well
+        r.step(30)
         r.type("10.0.0.2\n")               # opponent's address
         r.step(30)
         if role != "client":
@@ -136,6 +150,7 @@ def main():
         else:
             r.type("J\n")
         r.shot(os.path.join(ROOT, "build/shots/serial_lobby_%s.png" % role))
+        sent = bytes(r.dump(L["fbuf"], L["fbuf"] + 8))   # what FujiNet got
         # the START key belongs to the lobby until the game runs
         st = {}
         moves = ["U", "UL", "U", "UR", "U", "L", "U", "R"]
@@ -159,6 +174,7 @@ def main():
     want = (cfg[1] + total) & 0xFF
     ok = (st["err_cnt"] == 0 and st["r_wr"] == want and st["tick"] == want
           and st["net_mode"] == 1 and cfg[1] in delays
+          and sent == b"10.0.0.2\0"
           and cfg[0] == (0x80 if role == "client" else 0x00))
     print("role %s: the tape sent %d ticks in %d packets; this Atari has "
           "r_wr=%d (want %d), tick=%d, damaged=%d, delay=%d"

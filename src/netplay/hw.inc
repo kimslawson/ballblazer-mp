@@ -32,6 +32,7 @@ PACTL   = $D302          ; bit 3 = cassette motor line (0 = on)
 NMIEN   = $D40E
 ; OS
 VIMIRQ  = $0216          ; immediate IRQ vector
+POKMSK  = $10            ; the OS's copy of IRQEN
 DCB     = $0300          ; SIO device control block
 DDEVIC  = $0300
 DUNIT   = $0301

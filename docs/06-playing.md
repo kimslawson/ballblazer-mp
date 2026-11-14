@@ -63,7 +63,11 @@ the emulator tests run there too (see the end of this document).
    and the host's stick set the options as usual. Each player uses the
    joystick in **port 1** of their own machine.
 
-START during `WAITING` gives up and starts a local game.
+**Mistyped the address?** BACK SPACE works as usual while you type (some
+emulator keyboards do not pass it on). After that there are two ways back
+to the address prompt, neither of which needs an editing key: answer the
+host/join question with just RETURN, or press START while the lobby says
+`WAITING`. From the address prompt, plain RETURN starts a local game.
 
 ### What to expect
 
@@ -120,7 +124,7 @@ so it tests the FujiNet side and the protocol, not the 0.9 ms receive margin.
 | the netplay code assembles and fits; the protocol reference survives 30 % loss | `make test` (no image needed) | ✅ |
 | two machines running the patched game stay bit-identical in everything the simulation uses | `make nplock`: two linked emulators, scripted joysticks, 30 % packet loss; both frozen on the same tick and all 64 KB compared, repeatedly | ✅ thousands of ticks, several seeds |
 | the interrupt-driven serial driver receives and sends every packet while the game's display kernels run | `make npserial`: a 2400-baud cassette image plays the remote machine against the production code; the emulator models POKEY's one-byte buffer | ✅ 600 packets / 60 s, both roles, 0 damaged |
-| the lobby's prompts, role and delay entry, handshake, and game start | same test, typed through the real prompts | ✅ |
+| the lobby's prompts, role and delay entry, both ways back to the address prompt, handshake, and game start | same test, typed through the real prompts | ✅ |
 | a full match plays — ball, goals, score, clock | screenshots from the above (`build/shots/`) | ✅ |
 | the two FujiNet commands and NetStream's behaviour | read from the firmware source only | ⏳ **needs real hardware** |
 | byte timing against a real POKEY and a real FujiNet UART | — | ⏳ **needs real hardware** |
@@ -138,8 +142,8 @@ the link is sound.
 | symptom | likely cause |
 |---|---|
 | `NO FUJINET ANSWERED` | no FujiNet on the bus, or it did not answer command `$E8` |
-| `FUJINET REFUSED NETSTREAM MODE` | firmware without the `$F0` command |
-| `WAITING FOR OPPONENT` forever | addresses swapped or mistyped; both chose the same role; firmware NetStream without baud selection (it then talks 19200 to our 2400); UDP 6502 blocked |
+| `FUJINET REFUSED NETSTREAM MODE` | firmware without the `$F0` command, or an address it could not make sense of; the lobby asks for the address again |
+| `WAITING FOR OPPONENT` forever | addresses swapped or mistyped (START goes back to the address prompt); both chose the same role; firmware NetStream without baud selection (it then talks 19200 to our 2400); UDP 6502 blocked |
 | `THIS IS NOT THE GAME IMAGE…` | a different dump; only the one in `rom/README.md` is supported |
 | `OPPONENT HAS A DIFFERENT VERSION` (host) | the two disks were built from different images or revisions of this code |
 | play stutters evenly, music drags | the input delay is below the link's round trip: let the host time the link (RETURN at the delay prompt) or type a larger delay. `vpeer.py` shows the round trip |
